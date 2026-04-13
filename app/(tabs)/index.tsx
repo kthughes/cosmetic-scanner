@@ -1,10 +1,19 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { useRef, useState } from "react";
-import { Alert, Button, Image, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
+import { ActivityIndicator, Alert, Button, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
 import { supabase } from "../../lib/supabase";
 
-type Screen = "name" | "scanner" | "addProduct" | "addIngredients" | "productFound";
+const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY || "";
+
+type Screen = "name" | "scanner" | "photoProduct" | "reviewProduct" | "photoIngredients" | "productFound";
+
+interface ProductDetails {
+  brand: string;
+  name: string;
+  product_type: string;
+  variant: string;
+}
 
 export default function HomeScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -12,15 +21,135 @@ export default function HomeScreen() {
   const [scannedBarcode, setScannedBarcode] = useState<string | null>(null);
   const [flash, setFlash] = useState(false);
   const [productFound, setProductFound] = useState<any>(null);
-  const [savedProductId, setSavedProductId] = useState<string | null>(null);
-  const [brand, setBrand] = useState("");
-  const [productName, setProductName] = useState("");
-  const [variant, setVariant] = useState("");
-  const [saving, setSaving] = useState(false);
   const [scannedBy, setScannedBy] = useState("");
   const [nameInput, setNameInput] = useState("");
+
+  // Product photo (front of product)
+  const [productPhoto, setProductPhoto] = useState<string | null>(null);
+  const [productPhotoBase64, setProductPhotoBase64] = useState<string | null>(null);
+
+  // Extracted + editable product details
+  const [brand, setBrand] = useState("");
+  const [productName, setProductName] = useState("");
+  const [productType, setProductType] = useState("");
+  const [variant, setVariant] = useState("");
+
+  // Ingredients photo
   const [ingredientPhoto, setIngredientPhoto] = useState<string | null>(null);
+  const [ingredientPhotoBase64, setIngredientPhotoBase64] = useState<string | null>(null);
+
+  // Loading states
+  const [parsing, setParsing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
   const lastScan = useRef<{ barcode: string; time: number } | null>(null);
+
+  // ─── GPT-4o PRODUCT DETAILS PARSER ────────────────────────────
+  const parseProductDetailsWithGPT = async (base64Image: string): Promise<ProductDetails> => {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${base64Image}`,
+                  detail: "high",
+                },
+              },
+              {
+                type: "text",
+                text: 'This is a photo of the front of a cosmetic product. Extract the following details and return them as a JSON object with exactly these fields: "brand" (the manufacturer or brand name), "name" (the product name, excluding brand), "product_type" (e.g. shampoo, conditioner, serum, moisturiser, mascara, foundation, lip gloss — one or two words), "variant" (colour, shade, flavour, scent, or edition — empty string if none). Return ONLY the JSON object, no explanation or other text. Example: {"brand": "L\'Oreal", "name": "Elvive", "product_type": "shampoo", "variant": "Coconut"}',
+              },
+            ],
+          },
+        ],
+        max_tokens: 300,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenAI API error: ${response.status}`);
+    }
+
+    const json = await response.json();
+    const content: string = json.choices?.[0]?.message?.content?.trim() ?? "{}";
+    const cleaned = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      brand: parsed.brand ?? "",
+      name: parsed.name ?? "",
+      product_type: parsed.product_type ?? "",
+      variant: parsed.variant ?? "",
+    };
+  };
+
+  // ─── GPT-4o INGREDIENT PARSER ──────────────────────────────────
+  const parseIngredientsWithGPT = async (base64Image: string): Promise<string[]> => {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${base64Image}`,
+                  detail: "high",
+                },
+              },
+              {
+                type: "text",
+                text: "Extract all ingredients from this cosmetic product label. Convert each ingredient to its standard INCI (International Nomenclature of Cosmetic Ingredients) name. Return ONLY a JSON array of INCI ingredient names in the order they appear on the label. Example: [\"AQUA\", \"SODIUM LAURYL SULFATE\", \"GLYCERIN\"]. Do not include any explanation or other text — only the JSON array.",
+              },
+            ],
+          },
+        ],
+        max_tokens: 1000,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenAI API error: ${response.status}`);
+    }
+
+    const json = await response.json();
+    const content: string = json.choices?.[0]?.message?.content?.trim() ?? "[]";
+    const cleaned = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return Array.isArray(parsed) ? parsed : [];
+  };
+
+  // ─── RESET ─────────────────────────────────────────────────────
+  const handleScanAgain = () => {
+    setScreen("scanner");
+    setScannedBarcode(null);
+    setProductFound(null);
+    setProductPhoto(null);
+    setProductPhotoBase64(null);
+    setBrand("");
+    setProductName("");
+    setProductType("");
+    setVariant("");
+    setIngredientPhoto(null);
+    setIngredientPhotoBase64(null);
+    lastScan.current = null;
+  };
 
   // ─── NAME SCREEN ───────────────────────────────────────────────
   if (screen === "name") {
@@ -89,10 +218,8 @@ export default function HomeScreen() {
     setFlash(true);
     setTimeout(() => setFlash(false), 150);
 
-    // Save to scans table
     await supabase.from("scans").insert([{ barcode: data }]);
 
-    // Look up barcode in products table
     const { data: product } = await supabase
       .from("products")
       .select("*")
@@ -104,112 +231,8 @@ export default function HomeScreen() {
       setScreen("productFound");
     } else {
       setProductFound(null);
-      setScreen("addProduct");
+      setScreen("photoProduct");
     }
-  };
-
-  // ─── SAVE PRODUCT HANDLER ──────────────────────────────────────
-  const handleSaveProduct = async () => {
-    if (!productName.trim()) {
-      Alert.alert("Please enter a product name");
-      return;
-    }
-    if (!brand.trim()) {
-      Alert.alert("Please enter a brand name");
-      return;
-    }
-
-    setSaving(true);
-
-    const { data: newProduct, error } = await supabase
-      .from("products")
-      .insert([{
-        barcode: scannedBarcode,
-        name: productName.trim(),
-        brand: brand.trim(),
-        variant: variant.trim() || null,
-        status: "unverified",
-        scanned_by: scannedBy,
-      }])
-      .select()
-      .single();
-
-    setSaving(false);
-
-    if (error) {
-      Alert.alert("Error saving product", error.message);
-    } else {
-      setSavedProductId(newProduct.id);
-      setBrand("");
-      setProductName("");
-      setVariant("");
-      setScreen("addIngredients");
-    }
-  };
-
-  // ─── TAKE INGREDIENTS PHOTO ────────────────────────────────────
-  const handleTakeIngredientPhoto = async () => {
-    try {
-      const result = await ImagePicker.launchCameraAsync({
-        quality: 0.8,
-        allowsEditing: false,
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setIngredientPhoto(result.assets[0].uri);
-      }
-    } catch (error) {
-      Alert.alert("Error opening camera", "Please try again");
-    }
-  };
-
-  // ─── SAVE INGREDIENTS ──────────────────────────────────────────
-  const handleSaveIngredients = async () => {
-    if (!ingredientPhoto) {
-      Alert.alert("Please take a photo of the ingredients first");
-      return;
-    }
-
-    setSaving(true);
-
-    const { error } = await supabase
-      .from("scans")
-      .update({
-        product_id: savedProductId,
-        image_url: ingredientPhoto,
-      })
-      .eq("barcode", scannedBarcode);
-
-    setSaving(false);
-
-    if (error) {
-      Alert.alert("Error saving ingredients", error.message);
-    } else {
-      setScreen("scanner");
-      setScannedBarcode(null);
-      setSavedProductId(null);
-      setIngredientPhoto(null);
-      lastScan.current = null;
-      Alert.alert(
-        "All saved! ✅",
-        "Thank you for building the database!",
-        [{ text: "Scan Another", style: "default" }]
-      );
-    }
-  };
-
-  // ─── RESET ─────────────────────────────────────────────────────
-  const handleScanAgain = () => {
-    setScreen("scanner");
-    setScannedBarcode(null);
-    setProductFound(null);
-    setSavedProductId(null);
-    setBrand("");
-    setProductName("");
-    setVariant("");
-    setIngredientPhoto(null);
-    lastScan.current = null;
   };
 
   // ─── PRODUCT FOUND SCREEN ──────────────────────────────────────
@@ -230,51 +253,74 @@ export default function HomeScreen() {
     );
   }
 
-  // ─── ADD PRODUCT FORM ──────────────────────────────────────────
-  if (screen === "addProduct") {
+  // ─── STEP 1: PHOTOGRAPH PRODUCT FRONT ─────────────────────────
+  if (screen === "photoProduct") {
+    const handleTakeProductPhoto = async () => {
+      try {
+        const result = await ImagePicker.launchCameraAsync({
+          quality: 0.8,
+          allowsEditing: false,
+          mediaTypes: ["images"],
+          base64: true,
+        });
+        if (!result.canceled && result.assets[0]) {
+          setProductPhoto(result.assets[0].uri);
+          setProductPhotoBase64(result.assets[0].base64 ?? null);
+        }
+      } catch {
+        Alert.alert("Error opening camera", "Please try again");
+      }
+    };
+
+    const handleAnalyseProductPhoto = async () => {
+      if (!productPhotoBase64) return;
+      setParsing(true);
+      try {
+        const details = await parseProductDetailsWithGPT(productPhotoBase64);
+        setBrand(details.brand);
+        setProductName(details.name);
+        setProductType(details.product_type);
+        setVariant(details.variant);
+        setScreen("reviewProduct");
+      } catch (err) {
+        Alert.alert("Could not analyse photo", "Please try again or check your connection.");
+      } finally {
+        setParsing(false);
+      }
+    };
+
     return (
       <View style={styles.formContainer}>
-        <Text style={styles.formTitle}>New Product! 🆕</Text>
-        <Text style={styles.formSubtitle}>Barcode: {scannedBarcode}</Text>
+        <Text style={styles.formTitle}>📷 Photograph Product</Text>
+        <Text style={styles.stepText}>Step 1 of 3 — Front of product</Text>
         <Text style={styles.formSubtitle}>
-          Scanning as: <Text style={{ fontWeight: "bold" }}>{scannedBy}</Text>
+          Take a clear photo of the front label so AI can read the brand and product name.
         </Text>
 
-        <Text style={styles.stepText}>Step 1 of 2 — Product Details</Text>
-
-        <Text style={styles.label}>Brand *</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g. L'Oreal"
-          value={brand}
-          onChangeText={setBrand}
-        />
-
-        <Text style={styles.label}>Product Name *</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g. Elvive Shampoo"
-          value={productName}
-          onChangeText={setProductName}
-        />
-
-        <Text style={styles.label}>Colour / Flavour / Variant (optional)</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g. Coconut, Blonde, Original"
-          value={variant}
-          onChangeText={setVariant}
-        />
-
-        <TouchableOpacity
-          style={styles.saveButton}
-          onPress={handleSaveProduct}
-          disabled={saving}
-        >
-          <Text style={styles.saveButtonText}>
-            {saving ? "Saving..." : "Next: Add Ingredients →"}
-          </Text>
-        </TouchableOpacity>
+        {productPhoto ? (
+          <View style={styles.photoContainer}>
+            <Image source={{ uri: productPhoto }} style={styles.photoPreview} resizeMode="cover" />
+            {parsing ? (
+              <View style={styles.parsingContainer}>
+                <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.parsingText}>Analysing with AI...</Text>
+              </View>
+            ) : (
+              <>
+                <TouchableOpacity style={styles.retakeButton} onPress={handleTakeProductPhoto}>
+                  <Text style={styles.retakeText}>Retake Photo</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.saveButton} onPress={handleAnalyseProductPhoto}>
+                  <Text style={styles.saveButtonText}>Analyse with AI →</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.photoButton} onPress={handleTakeProductPhoto}>
+            <Text style={styles.photoButtonText}>📷 Take Photo of Product</Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity style={styles.cancelButton} onPress={handleScanAgain}>
           <Text style={styles.cancelText}>Cancel</Text>
@@ -283,52 +329,195 @@ export default function HomeScreen() {
     );
   }
 
-  // ─── ADD INGREDIENTS SCREEN ────────────────────────────────────
-  if (screen === "addIngredients") {
+  // ─── STEP 2: REVIEW & EDIT EXTRACTED DETAILS ──────────────────
+  if (screen === "reviewProduct") {
+    return (
+      <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <Text style={styles.formTitle}>✏️ Review Details</Text>
+        <Text style={styles.stepText}>Step 2 of 3 — Correct any mistakes</Text>
+
+        {productPhoto && (
+          <Image source={{ uri: productPhoto }} style={styles.thumbPreview} resizeMode="cover" />
+        )}
+
+        <Text style={styles.label}>Brand *</Text>
+        <TextInput
+          style={styles.input}
+          value={brand}
+          onChangeText={setBrand}
+          placeholder="e.g. L'Oreal"
+        />
+
+        <Text style={styles.label}>Product Name *</Text>
+        <TextInput
+          style={styles.input}
+          value={productName}
+          onChangeText={setProductName}
+          placeholder="e.g. Elvive"
+        />
+
+        <Text style={styles.label}>Product Type *</Text>
+        <TextInput
+          style={styles.input}
+          value={productType}
+          onChangeText={setProductType}
+          placeholder="e.g. shampoo, serum, mascara"
+        />
+
+        <Text style={styles.label}>Variant / Shade / Scent (optional)</Text>
+        <TextInput
+          style={styles.input}
+          value={variant}
+          onChangeText={setVariant}
+          placeholder="e.g. Coconut, Blonde, Original"
+        />
+
+        <TouchableOpacity
+          style={[styles.saveButton, (!brand.trim() || !productName.trim() || !productType.trim()) && styles.buttonDisabled]}
+          onPress={() => {
+            if (!brand.trim() || !productName.trim() || !productType.trim()) {
+              Alert.alert("Please fill in brand, name and product type");
+              return;
+            }
+            setScreen("photoIngredients");
+          }}
+        >
+          <Text style={styles.saveButtonText}>Confirm → Photograph Ingredients</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.cancelButton} onPress={() => setScreen("photoProduct")}>
+          <Text style={styles.cancelText}>← Retake Product Photo</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  }
+
+  // ─── STEP 3 + 4: PHOTOGRAPH INGREDIENTS & SAVE ────────────────
+  if (screen === "photoIngredients") {
+    const handleTakeIngredientPhoto = async () => {
+      try {
+        const result = await ImagePicker.launchCameraAsync({
+          quality: 0.8,
+          allowsEditing: false,
+          mediaTypes: ["images"],
+          base64: true,
+        });
+        if (!result.canceled && result.assets[0]) {
+          setIngredientPhoto(result.assets[0].uri);
+          setIngredientPhotoBase64(result.assets[0].base64 ?? null);
+        }
+      } catch {
+        Alert.alert("Error opening camera", "Please try again");
+      }
+    };
+
+    const handleSaveAll = async () => {
+      if (!ingredientPhoto) {
+        Alert.alert("Please take a photo of the ingredients first");
+        return;
+      }
+
+      setSaving(true);
+
+      // Insert product
+      const { data: newProduct, error: productError } = await supabase
+        .from("products")
+        .insert([{
+          barcode: scannedBarcode,
+          brand: brand.trim(),
+          name: productName.trim(),
+          product_type: productType.trim(),
+          variant: variant.trim() || null,
+          status: "unverified",
+          scanned_by: scannedBy,
+          product_image_url: productPhoto,
+        }])
+        .select()
+        .single();
+
+      if (productError) {
+        setSaving(false);
+        Alert.alert("Error saving product", productError.message);
+        return;
+      }
+
+      const newProductId = newProduct.id;
+
+      // Link scan record to product
+      await supabase
+        .from("scans")
+        .update({ product_id: newProductId, image_url: ingredientPhoto })
+        .eq("barcode", scannedBarcode);
+
+      // Parse ingredients and insert
+      if (ingredientPhotoBase64) {
+        try {
+          const parsedIngredients = await parseIngredientsWithGPT(ingredientPhotoBase64);
+
+          if (parsedIngredients.length > 0) {
+            const rows = parsedIngredients.map((name: string, index: number) => ({
+              product_id: newProductId,
+              ingredient_name: name,
+              position: index + 1,
+            }));
+
+            const { error: ingredientsError } = await supabase
+              .from("product_ingredients")
+              .insert(rows);
+
+            if (ingredientsError) {
+              console.warn("Failed to save parsed ingredients:", ingredientsError.message);
+            }
+          }
+        } catch (gptError) {
+          console.warn("GPT ingredient parsing failed:", gptError);
+        }
+      }
+
+      setSaving(false);
+      handleScanAgain();
+      Alert.alert(
+        "All saved! ✅",
+        "Thank you for building the database!",
+        [{ text: "Scan Another", style: "default" }]
+      );
+    };
+
     return (
       <View style={styles.formContainer}>
         <Text style={styles.formTitle}>📸 Photograph Ingredients</Text>
+        <Text style={styles.stepText}>Step 3 of 3 — Ingredients list</Text>
         <Text style={styles.formSubtitle}>
-          Step 2 of 2 — Take a clear photo of the ingredients list on the product label
-        </Text>
-        <Text style={styles.formSubtitle}>
-          Make sure all the text is visible and in focus
+          Take a clear photo of the full ingredients list. Make sure all text is visible and in focus.
         </Text>
 
         {ingredientPhoto ? (
           <View style={styles.photoContainer}>
-            <Image
-              source={{ uri: ingredientPhoto }}
-              style={styles.photoPreview}
-              resizeMode="cover"
-            />
-            <TouchableOpacity
-              style={styles.retakeButton}
-              onPress={handleTakeIngredientPhoto}
-            >
-              <Text style={styles.retakeText}>Retake Photo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.saveButton}
-              onPress={handleSaveIngredients}
-              disabled={saving}
-            >
-              <Text style={styles.saveButtonText}>
-                {saving ? "Saving..." : "Save & Finish ✅"}
-              </Text>
-            </TouchableOpacity>
+            <Image source={{ uri: ingredientPhoto }} style={styles.photoPreview} resizeMode="cover" />
+            {saving ? (
+              <View style={styles.parsingContainer}>
+                <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.parsingText}>Saving & parsing ingredients...</Text>
+              </View>
+            ) : (
+              <>
+                <TouchableOpacity style={styles.retakeButton} onPress={handleTakeIngredientPhoto}>
+                  <Text style={styles.retakeText}>Retake Photo</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.saveButton} onPress={handleSaveAll}>
+                  <Text style={styles.saveButtonText}>Save & Finish ✅</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         ) : (
-          <TouchableOpacity
-            style={styles.photoButton}
-            onPress={handleTakeIngredientPhoto}
-          >
+          <TouchableOpacity style={styles.photoButton} onPress={handleTakeIngredientPhoto}>
             <Text style={styles.photoButtonText}>📷 Take Photo of Ingredients</Text>
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity style={styles.cancelButton} onPress={handleScanAgain}>
-          <Text style={styles.cancelText}>Skip & Scan Another</Text>
+        <TouchableOpacity style={styles.cancelButton} onPress={() => setScreen("reviewProduct")}>
+          <Text style={styles.cancelText}>← Back to Review</Text>
         </TouchableOpacity>
       </View>
     );
@@ -517,6 +706,12 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     justifyContent: "center",
   },
+  scrollContainer: {
+    padding: 25,
+    backgroundColor: "white",
+    paddingTop: 60,
+    paddingBottom: 40,
+  },
   formTitle: {
     fontSize: 22,
     fontWeight: "bold",
@@ -533,15 +728,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#007AFF",
     fontWeight: "600",
-    marginBottom: 15,
-    marginTop: 5,
+    marginBottom: 12,
+    marginTop: 4,
   },
   label: {
     fontSize: 14,
     fontWeight: "600",
     color: "#333",
     marginBottom: 5,
-    marginTop: 10,
+    marginTop: 12,
   },
   input: {
     borderWidth: 1,
@@ -557,6 +752,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
     marginTop: 25,
+  },
+  buttonDisabled: {
+    opacity: 0.4,
   },
   saveButtonText: {
     color: "white",
@@ -607,6 +805,7 @@ const styles = StyleSheet.create({
   photoContainer: {
     marginTop: 15,
     alignItems: "center",
+    width: "100%",
   },
   photoPreview: {
     width: "100%",
@@ -614,12 +813,28 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 15,
   },
+  thumbPreview: {
+    width: "100%",
+    height: 120,
+    borderRadius: 10,
+    marginBottom: 5,
+    marginTop: 8,
+  },
   retakeButton: {
     padding: 10,
-    marginBottom: 10,
+    marginBottom: 5,
   },
   retakeText: {
     color: "#007AFF",
     fontSize: 16,
+  },
+  parsingContainer: {
+    alignItems: "center",
+    paddingVertical: 20,
+  },
+  parsingText: {
+    marginTop: 12,
+    fontSize: 15,
+    color: "#555",
   },
 });
