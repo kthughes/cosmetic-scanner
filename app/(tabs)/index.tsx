@@ -1,12 +1,12 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
-import { useRef, useState } from "react";
-import { ActivityIndicator, Alert, Button, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Button, Image, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
 import { supabase } from "../../lib/supabase";
 
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY || "";
 
-type Screen = "name" | "scanner" | "photoProduct" | "reviewProduct" | "photoIngredients" | "productFound";
+type Screen = "name" | "scanner" | "photoProduct" | "reviewProduct" | "photoIngredients" | "reviewIngredients" | "productFound";
 
 interface ProductDetails {
   brand: string;
@@ -38,11 +38,23 @@ export default function HomeScreen() {
   const [ingredientPhoto, setIngredientPhoto] = useState<string | null>(null);
   const [ingredientPhotoBase64, setIngredientPhotoBase64] = useState<string | null>(null);
 
+  // Parsed ingredients (stored so review screen doesn't re-parse)
+  const [parsedIngredients, setParsedIngredients] = useState<string[]>([]);
+
   // Loading states
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Keyboard visibility — tracked at component level (hooks can't be inside conditionals)
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
+    const hide = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+
   const lastScan = useRef<{ barcode: string; time: number } | null>(null);
+  const ingredientInputRefs = useRef<(TextInput | null)[]>([]);
 
   // ─── GPT-4o PRODUCT DETAILS PARSER ────────────────────────────
   const parseProductDetailsWithGPT = async (base64Image: string): Promise<ProductDetails> => {
@@ -115,7 +127,7 @@ export default function HomeScreen() {
               },
               {
                 type: "text",
-                text: "Extract all ingredients from this cosmetic product label. Convert each ingredient to its standard INCI (International Nomenclature of Cosmetic Ingredients) name. Return ONLY a JSON array of INCI ingredient names in the order they appear on the label. Example: [\"AQUA\", \"SODIUM LAURYL SULFATE\", \"GLYCERIN\"]. Do not include any explanation or other text — only the JSON array.",
+                text: 'Extract all ingredients from this cosmetic product label exactly as they appear — do not convert to INCI or change the spelling. Do NOT guess any ingredient you cannot read clearly. If a word is unclear or uncertain, skip it entirely rather than guessing. Never invent ingredient names. Return ONLY a JSON object with one field: "ingredients" (a JSON array of strings in the order they appear on the label). Example: {"ingredients": ["Water", "Glycerin", "Sodium Lauryl Sulfate"]}. Do not include any explanation or other text — only the JSON object.',
               },
             ],
           },
@@ -129,10 +141,49 @@ export default function HomeScreen() {
     }
 
     const json = await response.json();
+    const content: string = json.choices?.[0]?.message?.content?.trim() ?? "{}";
+    const cleaned = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return Array.isArray(parsed.ingredients) ? parsed.ingredients : [];
+  };
+
+  // ─── GPT-4o-mini INCI CONVERTER (text-only, background) ────────
+  const convertToINCIWithGPT = async (
+    ingredients: string[]
+  ): Promise<Array<{ raw: string; inci: string }>> => {
+    const numbered = ingredients.map((ing, i) => `${i + 1}. ${ing}`).join("\n");
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "user",
+            content: `Convert these cosmetic ingredient names to their official INCI (International Nomenclature of Cosmetic Ingredients) names. Return ONLY a JSON array of objects with 'raw' and 'inci' fields. If you cannot find an INCI name, use the raw name as the inci value. Do not include any explanation.\n\n${numbered}`,
+          },
+        ],
+        max_tokens: 2000,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenAI API error: ${response.status}`);
+    }
+
+    const json = await response.json();
     const content: string = json.choices?.[0]?.message?.content?.trim() ?? "[]";
     const cleaned = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
     const parsed = JSON.parse(cleaned);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed)
+      ? parsed.map((item: any) => ({
+          raw: typeof item.raw === "string" ? item.raw : "",
+          inci: typeof item.inci === "string" ? item.inci : (item.raw ?? ""),
+        }))
+      : ingredients.map(ing => ({ raw: ing, inci: ing }));
   };
 
   // ─── RESET ─────────────────────────────────────────────────────
@@ -148,7 +199,136 @@ export default function HomeScreen() {
     setVariant("");
     setIngredientPhoto(null);
     setIngredientPhotoBase64(null);
+    setParsedIngredients([]);
     lastScan.current = null;
+  };
+
+  // ─── CONFIRM SAVE (called from reviewIngredients) ─────────────
+  const handleConfirmSave = async () => {
+    setSaving(true);
+
+    const timestamp = Date.now();
+    const filename = `${scannedBarcode}_${timestamp}.jpg`;
+
+    // Upload product photo to Supabase Storage
+    let productPhotoUrl: string | null = productPhoto;
+    if (productPhoto) {
+      try {
+        console.log("[upload] fetching product photo blob from URI:", productPhoto);
+        const photoBlob = await fetch(productPhoto).then(r => r.blob());
+        console.log("[upload] product photo blob size:", photoBlob.size, "type:", photoBlob.type);
+        console.log("[upload] uploading product photo to bucket 'product-photo' as:", filename);
+        const { error: uploadErr } = await supabase.storage
+          .from("product-photo")
+          .upload(filename, photoBlob, { contentType: "image/jpeg" });
+        if (!uploadErr) {
+          const { data: urlData } = supabase.storage.from("product-photo").getPublicUrl(filename);
+          productPhotoUrl = urlData.publicUrl;
+          console.log("[upload] product photo uploaded, public URL:", productPhotoUrl);
+        } else {
+          console.warn("[upload] product photo upload failed:", uploadErr.message);
+        }
+      } catch (err) {
+        console.warn("[upload] product photo upload error:", err);
+      }
+    }
+
+    // Upload ingredient photo to Supabase Storage
+    let ingredientPhotoUrl: string | null = ingredientPhoto;
+    if (ingredientPhoto) {
+      try {
+        console.log("[upload] fetching ingredient photo blob from URI:", ingredientPhoto);
+        const ingBlob = await fetch(ingredientPhoto).then(r => r.blob());
+        console.log("[upload] ingredient photo blob size:", ingBlob.size, "type:", ingBlob.type);
+        console.log("[upload] uploading ingredient photo to bucket 'ingredients-photo' as:", filename);
+        const { error: ingUploadErr } = await supabase.storage
+          .from("ingredients-photo")
+          .upload(filename, ingBlob, { contentType: "image/jpeg" });
+        if (!ingUploadErr) {
+          const { data: ingUrlData } = supabase.storage.from("ingredients-photo").getPublicUrl(filename);
+          ingredientPhotoUrl = ingUrlData.publicUrl;
+          console.log("[upload] ingredient photo uploaded, public URL:", ingredientPhotoUrl);
+        } else {
+          console.warn("[upload] ingredient photo upload failed:", ingUploadErr.message);
+        }
+      } catch (err) {
+        console.warn("[upload] ingredient photo upload error:", err);
+      }
+    }
+
+    // Insert product
+    const { data: newProduct, error: productError } = await supabase
+      .from("products")
+      .insert([{
+        barcode: scannedBarcode,
+        brand: brand.trim(),
+        name: productName.trim(),
+        product_type: productType.trim(),
+        variant: variant.trim() || null,
+        status: "unverified",
+        qc_status: "pending",
+        scanned_by: scannedBy,
+        product_image_url: productPhotoUrl,
+      }])
+      .select()
+      .single();
+
+    if (productError) {
+      setSaving(false);
+      Alert.alert("Error saving product", productError.message);
+      return;
+    }
+
+    const newProductId = newProduct.id;
+
+    await supabase
+      .from("scans")
+      .update({ product_id: newProductId, image_url: ingredientPhotoUrl })
+      .eq("barcode", scannedBarcode);
+
+    if (parsedIngredients.length > 0) {
+      // Insert raw text immediately so data is never lost
+      const rows = parsedIngredients.map((text: string, index: number) => ({
+        product_id: newProductId,
+        ingredient_name: text,
+        raw_text: text,
+        position: index + 1,
+      }));
+
+      const { error: ingredientsError } = await supabase
+        .from("product_ingredients")
+        .insert(rows);
+
+      if (ingredientsError) {
+        console.warn("Failed to save parsed ingredients:", ingredientsError.message);
+      }
+    }
+
+    setSaving(false);
+    handleScanAgain();
+    Alert.alert(
+      "All saved! ✅",
+      "Thank you for building the database!",
+      [{ text: "Scan Another", style: "default" }]
+    );
+
+    // Background INCI conversion — runs after the UI has already reset
+    if (parsedIngredients.length > 0) {
+      convertToINCIWithGPT(parsedIngredients)
+        .then(async (inciResults) => {
+          for (let i = 0; i < inciResults.length; i++) {
+            await supabase
+              .from("product_ingredients")
+              .update({ ingredient_name: inciResults[i].inci })
+              .eq("product_id", newProductId)
+              .eq("position", i + 1);
+          }
+        })
+        .catch(err => {
+          console.warn("Background INCI conversion failed:", err);
+          // Raw text is already saved — nothing is lost
+        });
+    }
   };
 
   // ─── NAME SCREEN ───────────────────────────────────────────────
@@ -411,76 +591,18 @@ export default function HomeScreen() {
       }
     };
 
-    const handleSaveAll = async () => {
-      if (!ingredientPhoto) {
-        Alert.alert("Please take a photo of the ingredients first");
-        return;
+    const handleAnalyseIngredients = async () => {
+      if (!ingredientPhotoBase64) return;
+      setParsing(true);
+      try {
+        const ingredients = await parseIngredientsWithGPT(ingredientPhotoBase64);
+        setParsedIngredients(ingredients);
+        setScreen("reviewIngredients");
+      } catch {
+        Alert.alert("Could not analyse photo", "Please try again or check your connection.");
+      } finally {
+        setParsing(false);
       }
-
-      setSaving(true);
-
-      // Insert product
-      const { data: newProduct, error: productError } = await supabase
-        .from("products")
-        .insert([{
-          barcode: scannedBarcode,
-          brand: brand.trim(),
-          name: productName.trim(),
-          product_type: productType.trim(),
-          variant: variant.trim() || null,
-          status: "unverified",
-          scanned_by: scannedBy,
-          product_image_url: productPhoto,
-        }])
-        .select()
-        .single();
-
-      if (productError) {
-        setSaving(false);
-        Alert.alert("Error saving product", productError.message);
-        return;
-      }
-
-      const newProductId = newProduct.id;
-
-      // Link scan record to product
-      await supabase
-        .from("scans")
-        .update({ product_id: newProductId, image_url: ingredientPhoto })
-        .eq("barcode", scannedBarcode);
-
-      // Parse ingredients and insert
-      if (ingredientPhotoBase64) {
-        try {
-          const parsedIngredients = await parseIngredientsWithGPT(ingredientPhotoBase64);
-
-          if (parsedIngredients.length > 0) {
-            const rows = parsedIngredients.map((name: string, index: number) => ({
-              product_id: newProductId,
-              ingredient_name: name,
-              position: index + 1,
-            }));
-
-            const { error: ingredientsError } = await supabase
-              .from("product_ingredients")
-              .insert(rows);
-
-            if (ingredientsError) {
-              console.warn("Failed to save parsed ingredients:", ingredientsError.message);
-            }
-          }
-        } catch (gptError) {
-          console.warn("GPT ingredient parsing failed:", gptError);
-        }
-      }
-
-      setSaving(false);
-      handleScanAgain();
-      Alert.alert(
-        "All saved! ✅",
-        "Thank you for building the database!",
-        [{ text: "Scan Another", style: "default" }]
-      );
     };
 
     return (
@@ -494,18 +616,18 @@ export default function HomeScreen() {
         {ingredientPhoto ? (
           <View style={styles.photoContainer}>
             <Image source={{ uri: ingredientPhoto }} style={styles.photoPreview} resizeMode="cover" />
-            {saving ? (
+            {parsing ? (
               <View style={styles.parsingContainer}>
                 <ActivityIndicator size="large" color="#007AFF" />
-                <Text style={styles.parsingText}>Saving & parsing ingredients...</Text>
+                <Text style={styles.parsingText}>Analysing ingredients with AI...</Text>
               </View>
             ) : (
               <>
                 <TouchableOpacity style={styles.retakeButton} onPress={handleTakeIngredientPhoto}>
                   <Text style={styles.retakeText}>Retake Photo</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.saveButton} onPress={handleSaveAll}>
-                  <Text style={styles.saveButtonText}>Save & Finish ✅</Text>
+                <TouchableOpacity style={styles.saveButton} onPress={handleAnalyseIngredients}>
+                  <Text style={styles.saveButtonText}>Analyse Ingredients →</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -520,6 +642,135 @@ export default function HomeScreen() {
           <Text style={styles.cancelText}>← Back to Review</Text>
         </TouchableOpacity>
       </View>
+    );
+  }
+
+  // ─── STEP 4: REVIEW INGREDIENTS ────────────────────────────────
+  if (screen === "reviewIngredients") {
+    const count = parsedIngredients.length;
+    const tooFew = count < 3;
+    const tooMany = count > 60;
+    const hasEmpty = parsedIngredients.some(i => i.trim() === "");
+
+    const handleRetake = () => {
+      setIngredientPhoto(null);
+      setIngredientPhotoBase64(null);
+      setParsedIngredients([]);
+      ingredientInputRefs.current = [];
+      setScreen("photoIngredients");
+    };
+
+    const handleUpdateIngredient = (index: number, text: string) => {
+      setParsedIngredients(prev => prev.map((item, i) => i === index ? text : item));
+    };
+
+    const handleDeleteIngredient = (index: number) => {
+      setParsedIngredients(prev => prev.filter((_, i) => i !== index));
+      ingredientInputRefs.current.splice(index, 1);
+    };
+
+    const handleAddIngredient = () => {
+      const newIndex = parsedIngredients.length;
+      setParsedIngredients(prev => [...prev, ""]);
+      setTimeout(() => {
+        ingredientInputRefs.current[newIndex]?.focus();
+      }, 50);
+    };
+
+    return (
+      <KeyboardAvoidingView
+        style={styles.reviewKAV}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <ScrollView
+          style={styles.reviewScroll}
+          contentContainerStyle={styles.reviewScrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.formTitle}>🧴 Review Ingredients</Text>
+          <Text style={styles.stepText}>Step 3 of 3 — Confirm ingredient list</Text>
+
+          <Text style={styles.ingredientCount}>{count} ingredients found</Text>
+
+          {tooFew && (
+            <Text style={styles.ingredientWarning}>
+              ⚠️ Very few ingredients found — please retake the photo
+            </Text>
+          )}
+          {tooMany && (
+            <Text style={styles.ingredientWarning}>
+              ⚠️ Unusually high number — please check the photo
+            </Text>
+          )}
+
+          <Text style={styles.formSubtitle}>
+            Please check these match your product label before saving.
+          </Text>
+
+          <View style={styles.ingredientList}>
+            {parsedIngredients.map((ingredient, index) => (
+              <View key={index} style={styles.editableIngredientRow}>
+                <Text style={styles.editableIngredientNumber}>{index + 1}.</Text>
+                <TextInput
+                  ref={ref => { ingredientInputRefs.current[index] = ref; }}
+                  style={styles.editableIngredientInput}
+                  value={ingredient}
+                  onChangeText={text => handleUpdateIngredient(index, text)}
+                  placeholder="Ingredient name"
+                  placeholderTextColor="#bbb"
+                  autoCapitalize="none"
+                  returnKeyType="next"
+                  onSubmitEditing={() => {
+                    const next = ingredientInputRefs.current[index + 1];
+                    if (next) next.focus();
+                    else handleAddIngredient();
+                  }}
+                />
+                <TouchableOpacity
+                  style={styles.deleteIngredientButton}
+                  onPress={() => handleDeleteIngredient(index)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.deleteIngredientText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+
+            <TouchableOpacity style={styles.addIngredientButton} onPress={handleAddIngredient}>
+              <Text style={styles.addIngredientText}>＋ Add Ingredient</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+
+        {keyboardVisible && (
+          <View style={styles.keyboardToolbar}>
+            <TouchableOpacity onPress={() => Keyboard.dismiss()}>
+              <Text style={styles.keyboardToolbarDone}>Done ✓</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={styles.reviewFooter}>
+          {saving ? (
+            <View style={styles.parsingContainer}>
+              <ActivityIndicator size="large" color="#007AFF" />
+              <Text style={styles.parsingText}>Uploading & converting ingredients...</Text>
+            </View>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={[styles.saveButton, hasEmpty && styles.buttonDisabled]}
+                onPress={hasEmpty ? undefined : handleConfirmSave}
+              >
+                <Text style={styles.saveButtonText}>✅ Save All {count} Ingredients</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.retakeIngredientButton} onPress={handleRetake}>
+                <Text style={styles.retakeIngredientText}>📸 Retake Photo</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -836,5 +1087,123 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 15,
     color: "#555",
+  },
+  ingredientCount: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#333",
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  ingredientWarning: {
+    fontSize: 14,
+    color: "#c0392b",
+    backgroundColor: "#fdecea",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  reviewKAV: {
+    flex: 1,
+    backgroundColor: "white",
+  },
+  reviewScroll: {
+    flex: 1,
+  },
+  reviewScrollContent: {
+    padding: 25,
+    paddingTop: 60,
+    paddingBottom: 16,
+  },
+  keyboardToolbar: {
+    backgroundColor: "#f2f2f7",
+    borderTopWidth: 1,
+    borderTopColor: "#c8c8cc",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+  },
+  keyboardToolbarDone: {
+    color: "#007AFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  reviewFooter: {
+    backgroundColor: "white",
+    paddingHorizontal: 25,
+    paddingBottom: 30,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#f0f0f0",
+  },
+  ingredientList: {
+    marginBottom: 12,
+  },
+  ingredientItem: {
+    fontSize: 14,
+    color: "#444",
+    paddingVertical: 4,
+    lineHeight: 20,
+  },
+  editableIngredientRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f4f4f4",
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginBottom: 6,
+  },
+  editableIngredientNumber: {
+    fontSize: 13,
+    color: "#999",
+    width: 28,
+    flexShrink: 0,
+  },
+  editableIngredientInput: {
+    flex: 1,
+    fontSize: 14,
+    color: "#333",
+    paddingVertical: 4,
+  },
+  deleteIngredientButton: {
+    paddingLeft: 8,
+  },
+  deleteIngredientText: {
+    fontSize: 15,
+    color: "#bbb",
+    fontWeight: "600",
+  },
+  addIngredientButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#d0d0d0",
+    borderStyle: "dashed",
+    marginTop: 4,
+  },
+  addIngredientText: {
+    fontSize: 14,
+    color: "#888",
+    fontWeight: "500",
+  },
+  retakeIngredientButton: {
+    padding: 15,
+    alignItems: "center",
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#007AFF",
+    borderRadius: 10,
+  },
+  retakeIngredientText: {
+    color: "#007AFF",
+    fontSize: 16,
+    fontWeight: "600",
   },
 });
