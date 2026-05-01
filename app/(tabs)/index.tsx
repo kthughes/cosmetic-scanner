@@ -22,6 +22,9 @@ import { supabase } from "../../lib/supabase";
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY || "";
+// TODO: DEVELOPER REVIEW — if EXPO_PUBLIC_OPENAI_API_KEY is missing, all GPT calls will return
+// 401 errors. The user gets a generic "Could not analyse photo" message with no indication why.
+// Consider adding a startup check and a clearer error message in that case.
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
@@ -245,89 +248,113 @@ export default function HomeScreen() {
     lastScan.current = null;
   };
 
+  // Saves the product, both photos, and ingredient list; then triggers background INCI conversion.
   const handleConfirmSave = async () => {
-    setSaving(true);
-
-    const filename = `${scannedBarcode}_${Date.now()}.jpg`;
-
-    // Upload both photos in parallel — falls back to null if either fails
-    const [productPhotoUrl, ingredientPhotoUrl] = await Promise.all([
-      productPhotoBase64 ? uploadPhotoBase64(productPhotoBase64, "product-photo", filename) : Promise.resolve(null),
-      ingredientPhotoBase64 ? uploadPhotoBase64(ingredientPhotoBase64, "ingredients-photo", filename) : Promise.resolve(null),
-    ]);
-
-    // Insert product
-    const { data: newProduct, error: productError } = await supabase
-      .from("products")
-      .insert([{
-        barcode: scannedBarcode,
-        brand: brand.trim(),
-        name: productName.trim(),
-        product_type: productType.trim(),
-        variant: variant.trim() || null,
-        status: "unverified",
-        qc_status: "pending",
-        scanned_by: scannedBy,
-        product_image_url: productPhotoUrl,
-      }])
-      .select()
-      .single();
-
-    if (productError) {
-      setSaving(false);
-      Alert.alert("Error saving product", productError.message);
+    // Guard: scannedBarcode should always be set at this point in the flow
+    if (!scannedBarcode) {
+      Alert.alert("Error", "No barcode found — please scan again.");
       return;
     }
 
-    const newProductId = newProduct.id;
+    setSaving(true);
 
-    await supabase
-      .from("scans")
-      .update({ product_id: newProductId, image_url: ingredientPhotoUrl })
-      .eq("barcode", scannedBarcode);
+    try {
+      const filename = `${scannedBarcode}_${Date.now()}.jpg`;
 
-    // Insert raw text immediately so data is never lost
-    if (parsedIngredients.length > 0) {
-      const rows = parsedIngredients.map((text, index) => ({
-        product_id: newProductId,
-        ingredient_name: text,
-        raw_text: text,
-        position: index + 1,
-      }));
+      // Upload both photos in parallel — falls back to null if either fails
+      const [productPhotoUrl, ingredientPhotoUrl] = await Promise.all([
+        productPhotoBase64 ? uploadPhotoBase64(productPhotoBase64, "product-photo", filename) : Promise.resolve(null),
+        ingredientPhotoBase64 ? uploadPhotoBase64(ingredientPhotoBase64, "ingredients-photo", filename) : Promise.resolve(null),
+      ]);
 
-      const { error: ingredientsError } = await supabase
-        .from("product_ingredients")
-        .insert(rows);
+      // Insert the product record
+      const { data: newProduct, error: productError } = await supabase
+        .from("products")
+        .insert([{
+          barcode: scannedBarcode,
+          brand: brand.trim(),
+          name: productName.trim(),
+          product_type: productType.trim(),
+          variant: variant.trim() || null,
+          status: "unverified",
+          qc_status: "pending",
+          scanned_by: scannedBy,
+          product_image_url: productPhotoUrl,
+        }])
+        .select()
+        .single();
 
-      if (ingredientsError) {
-        console.warn("Failed to save ingredients:", ingredientsError.message);
+      if (productError) {
+        Alert.alert("Error saving product", productError.message);
+        return; // finally block will still run and reset saving state
       }
-    }
 
-    setSaving(false);
-    handleScanAgain();
-    Alert.alert("All saved! ✅", "Thank you for building the database!", [
-      { text: "Scan Another", style: "default" },
-    ]);
+      const newProductId = newProduct.id;
 
-    // Background INCI conversion — runs after UI resets; raw text is already safe in DB
-    if (parsedIngredients.length > 0) {
-      convertToINCIWithGPT(parsedIngredients)
-        .then(async (inciResults) => {
-          for (let i = 0; i < inciResults.length; i++) {
-            await supabase
-              .from("product_ingredients")
-              .update({ ingredient_name: inciResults[i].inci })
-              .eq("product_id", newProductId)
-              .eq("position", i + 1);
-          }
-        })
-        .catch(err => {
-          console.warn("Background INCI conversion failed:", err);
-        });
+      // Link the scan record to the new product and store the ingredient photo URL
+      const { error: scanUpdateError } = await supabase
+        .from("scans")
+        .update({ product_id: newProductId, image_url: ingredientPhotoUrl })
+        .eq("barcode", scannedBarcode);
+      if (scanUpdateError) console.warn("[save] Failed to update scan record:", scanUpdateError.message);
+
+      // Insert raw ingredient text — INCI names will be patched in the background
+      if (parsedIngredients.length > 0) {
+        const rows = parsedIngredients.map((text, index) => ({
+          product_id: newProductId,
+          ingredient_name: text,
+          raw_text: text,
+          position: index + 1,
+        }));
+
+        const { error: ingredientsError } = await supabase
+          .from("product_ingredients")
+          .insert(rows);
+
+        if (ingredientsError) {
+          console.warn("[save] Failed to save ingredients:", ingredientsError.message);
+          // Roll back the product insert to avoid an orphaned record with no ingredients
+          await supabase.from("products").delete().eq("id", newProductId);
+          Alert.alert("Save failed", "Could not save the ingredient list. Please try again — your photos and ingredients have been kept.");
+          return; // finally resets saving state; all state is preserved so the user can retry
+        }
+      }
+
+      // Snapshot the list before handleScanAgain clears parsedIngredients state
+      const ingredientsSnapshot = [...parsedIngredients];
+
+      handleScanAgain();
+      Alert.alert("All saved! ✅", "Thank you for building the database!", [
+        { text: "Scan Another", style: "default" },
+      ]);
+
+      // Background INCI conversion — fires after UI resets; raw text is already safe in DB
+      if (ingredientsSnapshot.length > 0) {
+        convertToINCIWithGPT(ingredientsSnapshot)
+          .then(async (inciResults) => {
+            for (let i = 0; i < inciResults.length; i++) {
+              await supabase
+                .from("product_ingredients")
+                .update({ ingredient_name: inciResults[i].inci })
+                .eq("product_id", newProductId)
+                .eq("position", i + 1);
+            }
+          })
+          .catch(err => {
+            console.warn("[inci] Background INCI conversion failed:", err);
+          });
+      }
+    } catch (e) {
+      // Network-level failure or unexpected error — inform the user and allow a retry
+      Alert.alert("Connection error", "Could not save the product. Please check your internet connection and try again.");
+      console.warn("[save] handleConfirmSave threw:", e);
+    } finally {
+      // Always reset the saving state, even if an early return or error occurred
+      setSaving(false);
     }
   };
 
+  // Fires on every frame the camera reads a barcode. Debounced via lastScan ref (3s window).
   const handleBarcodeScan = async ({ data }: { data: string }) => {
     const now = Date.now();
     if (lastScan.current?.barcode === data && now - lastScan.current.time < 3000) return;
@@ -339,20 +366,40 @@ export default function HomeScreen() {
     setFlash(true);
     setTimeout(() => setFlash(false), 150);
 
-    await supabase.from("scans").insert([{ barcode: data }]);
+    try {
+      // Record the scan event — errors here are non-fatal; the product lookup still proceeds
+      const { error: scanError } = await supabase.from("scans").insert([{ barcode: data }]);
+      if (scanError) console.warn("[scan] Failed to insert scan record:", scanError.message);
 
-    const { data: product } = await supabase
-      .from("products")
-      .select("*")
-      .eq("barcode", data)
-      .single();
+      // Check if this barcode already exists in the database.
+      // maybeSingle returns { data: null, error: null } when no rows match, so we can
+      // distinguish "not found" (expected) from an actual DB/network error.
+      const { data: product, error: productError } = await supabase
+        .from("products")
+        .select("*")
+        .eq("barcode", data)
+        .maybeSingle();
 
-    if (product) {
-      setProductFound(product);
-      setScreen("productFound");
-    } else {
-      setProductFound(null);
-      setScreen("photoProduct");
+      if (productError) {
+        // Unexpected error — reset so the user can try again
+        Alert.alert("Connection error", "Could not check this product. Please check your internet connection and try again.");
+        lastScan.current = null;
+        setScannedBarcode(null);
+        return;
+      }
+
+      if (product) {
+        setProductFound(product);
+        setScreen("productFound");
+      } else {
+        setProductFound(null);
+        setScreen("photoProduct");
+      }
+    } catch (e) {
+      // Network-level failure (e.g. fetch threw before reaching Supabase)
+      Alert.alert("Connection error", "Could not connect to the database. Please check your internet connection.");
+      lastScan.current = null;
+      setScannedBarcode(null);
     }
   };
 

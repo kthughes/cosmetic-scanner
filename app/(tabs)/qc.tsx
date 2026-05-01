@@ -12,6 +12,8 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 
+// TODO: DEVELOPER REVIEW — PIN is hardcoded in plain text. Before production, move this to an
+// environment variable or a server-side check so it cannot be read from the app bundle.
 const CORRECT_PIN = "1234";
 
 interface Ingredient {
@@ -59,39 +61,46 @@ export default function QCScreen() {
     const fetchPending = async () => {
       setLoading(true);
 
-      // Step 1: fetch pending products with their ingredients
-      const { data: productData, error: productError } = await supabase
-        .from("products")
-        .select("*, product_ingredients(ingredient_name, position)")
-        .eq("qc_status", "pending")
-        .order("created_at", { ascending: false });
+      try {
+        // Step 1: fetch pending products with their ingredients
+        const { data: productData, error: productError } = await supabase
+          .from("products")
+          .select("*, product_ingredients(ingredient_name, position)")
+          .eq("qc_status", "pending")
+          .order("created_at", { ascending: false });
 
-      if (productError) {
-        Alert.alert("Error loading products", productError.message);
+        if (productError) {
+          Alert.alert("Error loading products", productError.message);
+          return; // finally block resets loading state
+        }
+
+        // Step 2: for each product, fetch its most recent scan image separately.
+        // Supabase cannot auto-detect the FK between products and scans, so we query individually.
+        const combined: PendingProduct[] = await Promise.all(
+          (productData ?? []).map(async (product: any) => {
+            const { data: scan } = await supabase
+              .from("scans")
+              .select("image_url")
+              .eq("product_id", product.id)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            return {
+              ...product,
+              ingredientPhotoUrl: scan?.image_url ?? null,
+            };
+          })
+        );
+
+        setProducts(combined);
+      } catch (e) {
+        // Network-level failure
+        Alert.alert("Connection error", "Could not load products. Please check your internet connection.");
+        console.warn("[qc] fetchPending threw:", e);
+      } finally {
         setLoading(false);
-        return;
       }
-
-      // Step 2: for each product, fetch its most recent scan image separately
-      const combined: PendingProduct[] = await Promise.all(
-        (productData ?? []).map(async (product: any) => {
-          const { data: scan } = await supabase
-            .from("scans")
-            .select("image_url")
-            .eq("product_id", product.id)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .single();
-
-          return {
-            ...product,
-            ingredientPhotoUrl: scan?.image_url ?? null,
-          };
-        })
-      );
-
-      setProducts(combined);
-      setLoading(false);
     };
     fetchPending();
   }, [authed]);
@@ -104,16 +113,21 @@ export default function QCScreen() {
 
   // ─── APPROVE ──────────────────────────────────────────────────
   const handleApprove = async (productId: string) => {
-    const { error } = await supabase
-      .from("products")
-      .update({ qc_status: "approved" })
-      .eq("id", productId);
-    if (error) {
-      Alert.alert("Error", error.message);
-      return;
+    try {
+      const { error } = await supabase
+        .from("products")
+        .update({ qc_status: "approved" })
+        .eq("id", productId);
+      if (error) {
+        Alert.alert("Error", error.message);
+        return;
+      }
+      setProducts(prev => prev.filter(p => p.id !== productId));
+      showToast("Approved! ✅");
+    } catch (e) {
+      Alert.alert("Connection error", "Could not approve product. Please check your internet connection.");
+      console.warn("[qc] handleApprove threw:", e);
     }
-    setProducts(prev => prev.filter(p => p.id !== productId));
-    showToast("Approved! ✅");
   };
 
   // ─── REJECT ───────────────────────────────────────────────────
@@ -127,16 +141,21 @@ export default function QCScreen() {
           text: "Reject",
           style: "destructive",
           onPress: async () => {
-            const { error } = await supabase
-              .from("products")
-              .update({ qc_status: "rejected" })
-              .eq("id", productId);
-            if (error) {
-              Alert.alert("Error", error.message);
-              return;
+            try {
+              const { error } = await supabase
+                .from("products")
+                .update({ qc_status: "rejected" })
+                .eq("id", productId);
+              if (error) {
+                Alert.alert("Error", error.message);
+                return;
+              }
+              setProducts(prev => prev.filter(p => p.id !== productId));
+              showToast("Rejected ❌");
+            } catch (e) {
+              Alert.alert("Connection error", "Could not reject product. Please check your internet connection.");
+              console.warn("[qc] handleReject threw:", e);
             }
-            setProducts(prev => prev.filter(p => p.id !== productId));
-            showToast("Rejected ❌");
           },
         },
       ]
