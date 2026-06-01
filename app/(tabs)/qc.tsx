@@ -259,29 +259,37 @@ export default function QCScreen() {
                 <Text style={styles.metaValue}>{product.barcode}</Text>
               </View>
 
-              {/* Photos */}
-              <View style={styles.photoRow}>
-                {product.product_image_url ? (
-                  <View style={styles.photoBlock}>
-                    <Text style={styles.photoLabel}>Product</Text>
-                    <Image
-                      source={{ uri: product.product_image_url }}
-                      style={styles.photo}
-                      resizeMode="cover"
-                    />
-                  </View>
-                ) : null}
-                {ingredientPhotoUrl ? (
-                  <View style={styles.photoBlock}>
-                    <Text style={styles.photoLabel}>Ingredients</Text>
+              {/* Photos — stacked vertically */}
+              {product.product_image_url ? (
+                <View style={styles.photoBlock}>
+                  <Text style={styles.photoLabel}>Product</Text>
+                  <Image
+                    source={{ uri: product.product_image_url }}
+                    style={styles.productPhoto}
+                    resizeMode="cover"
+                  />
+                </View>
+              ) : null}
+              {ingredientPhotoUrl ? (
+                <View style={styles.photoBlock}>
+                  <Text style={styles.photoLabel}>Ingredients — pinch to zoom</Text>
+                  <ScrollView
+                    style={styles.ingredientPhotoScroll}
+                    maximumZoomScale={4}
+                    minimumZoomScale={1}
+                    bouncesZoom
+                    showsHorizontalScrollIndicator={false}
+                    showsVerticalScrollIndicator={false}
+                    centerContent
+                  >
                     <Image
                       source={{ uri: ingredientPhotoUrl }}
-                      style={styles.photo}
+                      style={styles.ingredientPhoto}
                       resizeMode="cover"
                     />
-                  </View>
-                ) : null}
-              </View>
+                  </ScrollView>
+                </View>
+              ) : null}
 
               {/* Ingredient list */}
               {ingredients.length > 0 && (
@@ -500,14 +508,8 @@ const styles = StyleSheet.create({
   },
 
   // ─── PHOTOS ────────────────────────────────────────────────────
-  photoRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 18,
-    marginBottom: 6,
-  },
   photoBlock: {
-    flex: 1,
+    marginTop: 18,
   },
   photoLabel: {
     fontSize: 12,
@@ -517,11 +519,22 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.4,
   },
-  photo: {
+  productPhoto: {
     width: "100%",
-    height: 160,
+    height: 200,
     borderRadius: 8,
     backgroundColor: "#f0f0f0",
+  },
+  // Fixed-height scroll container — clips to the frame so ingredient list stays visible below
+  ingredientPhotoScroll: {
+    width: "100%",
+    height: 250,
+    borderRadius: 8,
+    backgroundColor: "#f0f0f0",
+  },
+  ingredientPhoto: {
+    width: "100%",
+    height: 250,
   },
 
   // ─── INGREDIENTS ───────────────────────────────────────────────
