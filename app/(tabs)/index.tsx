@@ -79,6 +79,8 @@ export default function HomeScreen() {
 
   const lastScan = useRef<{ barcode: string; time: number } | null>(null);
   const ingredientInputRefs = useRef<(TextInput | null)[]>([]);
+  // Prevents concurrent barcode processing — ref (not state) so it's synchronously reliable
+  const isProcessing = useRef(false);
 
   useEffect(() => {
     const show = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
@@ -246,6 +248,7 @@ export default function HomeScreen() {
     setIngredientPhotoBase64(null);
     setParsedIngredients([]);
     lastScan.current = null;
+    isProcessing.current = false;
   };
 
   // Saves the product, both photos, and ingredient list; then triggers background INCI conversion.
@@ -354,18 +357,8 @@ export default function HomeScreen() {
     }
   };
 
-  // Fires on every frame the camera reads a barcode. Debounced via lastScan ref (3s window).
-  const handleBarcodeScan = async ({ data }: { data: string }) => {
-    const now = Date.now();
-    if (lastScan.current?.barcode === data && now - lastScan.current.time < 3000) return;
-
-    lastScan.current = { barcode: data, time: now };
-    setScannedBarcode(data);
-
-    Vibration.vibrate(100);
-    setFlash(true);
-    setTimeout(() => setFlash(false), 150);
-
+  // Async DB work for a confirmed barcode — called by handleBarcodeScan below.
+  const processBarcodeScan = async (data: string) => {
     try {
       // Record the scan event — errors here are non-fatal; the product lookup still proceeds
       const { error: scanError } = await supabase.from("scans").insert([{ barcode: data }]);
@@ -381,7 +374,6 @@ export default function HomeScreen() {
         .maybeSingle();
 
       if (productError) {
-        // Unexpected error — reset so the user can try again
         Alert.alert("Connection error", "Could not check this product. Please check your internet connection and try again.");
         lastScan.current = null;
         setScannedBarcode(null);
@@ -400,7 +392,30 @@ export default function HomeScreen() {
       Alert.alert("Connection error", "Could not connect to the database. Please check your internet connection.");
       lastScan.current = null;
       setScannedBarcode(null);
+    } finally {
+      isProcessing.current = false;
     }
+  };
+
+  // Synchronous handler passed to CameraView's onBarcodeScanned.
+  // MUST NOT be async — in production EAS builds (Hermes engine), passing an async function to
+  // a native callback causes silent failures because Hermes receives an unexpected Promise return
+  // value from the native event. The async DB work is delegated to processBarcodeScan instead.
+  const handleBarcodeScan = ({ data }: { data: string }) => {
+    const now = Date.now();
+    if (lastScan.current?.barcode === data && now - lastScan.current.time < 3000) return;
+    if (isProcessing.current) return;
+
+    lastScan.current = { barcode: data, time: now };
+    isProcessing.current = true;
+    setScannedBarcode(data);
+
+    Vibration.vibrate(100);
+    setFlash(true);
+    setTimeout(() => setFlash(false), 150);
+
+    // Fire and forget — errors are handled inside processBarcodeScan
+    processBarcodeScan(data);
   };
 
   // ─── SCREENS ───────────────────────────────────────────────────────────────
