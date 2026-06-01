@@ -1,3 +1,4 @@
+import { decode } from "base64-arraybuffer";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useRef, useState } from "react";
@@ -101,12 +102,13 @@ export default function HomeScreen() {
       // Remove data URI prefix if present
       const base64Data = base64.replace(/^data:image\/\w+;base64,/, "");
 
-      // Decode base64 to binary buffer
-      const binaryString = Buffer.from(base64Data, "base64");
+      // Supabase's own docs state: in React Native, Blob/FormData/Buffer do not work as upload
+      // bodies — only a real ArrayBuffer does. decode() returns a native ArrayBuffer.
+      const arrayBuffer = decode(base64Data);
 
       const { error } = await supabase.storage
         .from(bucket)
-        .upload(filename, binaryString, { contentType: "image/jpeg", upsert: true });
+        .upload(filename, arrayBuffer, { contentType: "image/jpeg", upsert: true });
 
       if (error) {
         console.log(`[upload] ${bucket} failed:`, error.message);
