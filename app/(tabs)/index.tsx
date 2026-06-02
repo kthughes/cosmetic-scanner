@@ -7,9 +7,6 @@ import {
   Alert,
   Button,
   Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -75,19 +72,9 @@ export default function HomeScreen() {
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Keyboard visibility must be tracked at component level — hooks can't live inside conditionals
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
-
   const lastScan = useRef<{ barcode: string; time: number } | null>(null);
-  const ingredientInputRefs = useRef<(TextInput | null)[]>([]);
   // Prevents concurrent barcode processing — ref (not state) so it's synchronously reliable
   const isProcessing = useRef(false);
-
-  useEffect(() => {
-    const show = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
-    const hide = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
-    return () => { show.remove(); hide.remove(); };
-  }, []);
 
   // ─── HELPERS ───────────────────────────────────────────────────────────────
 
@@ -254,7 +241,7 @@ export default function HomeScreen() {
   };
 
   // Saves the product, both photos, and ingredient list; then triggers background INCI conversion.
-  const handleConfirmSave = async () => {
+  const handleConfirmSave = async (qcStatus: "pending" | "flagged") => {
     // Guard: scannedBarcode should always be set at this point in the flow
     if (!scannedBarcode) {
       Alert.alert("Error", "No barcode found — please scan again.");
@@ -282,7 +269,7 @@ export default function HomeScreen() {
           product_type: productType.trim(),
           variant: variant.trim() || null,
           status: "unverified",
-          qc_status: "pending",
+          qc_status: qcStatus,
           scanned_by: scannedBy,
           product_image_url: productPhotoUrl,
         }])
@@ -329,9 +316,11 @@ export default function HomeScreen() {
       const ingredientsSnapshot = [...parsedIngredients];
 
       handleScanAgain();
-      Alert.alert("All saved! ✅", "Thank you for building the database!", [
-        { text: "Scan Another", style: "default" },
-      ]);
+      Alert.alert(
+        qcStatus === "flagged" ? "Flagged for review — thank you!" : "All saved! ✅",
+        "Thank you for building the database!",
+        [{ text: "Scan Another", style: "default" }]
+      );
 
       // Background INCI conversion — fires after UI resets; raw text is already safe in DB
       if (ingredientsSnapshot.length > 0) {
@@ -673,45 +662,24 @@ export default function HomeScreen() {
     );
   }
 
-  // Step 4 — review ingredient list before saving
+  // Step 4 — read-only ingredient review before saving
   if (screen === "reviewIngredients") {
     const count = parsedIngredients.length;
     const tooFew = count < 3;
     const tooMany = count > 60;
-    const hasEmpty = parsedIngredients.some(i => i.trim() === "");
 
     const handleRetake = () => {
       setIngredientPhoto(null);
       setIngredientPhotoBase64(null);
       setParsedIngredients([]);
-      ingredientInputRefs.current = [];
       setScreen("photoIngredients");
     };
 
-    const handleUpdateIngredient = (index: number, text: string) => {
-      setParsedIngredients(prev => prev.map((item, i) => i === index ? text : item));
-    };
-
-    const handleDeleteIngredient = (index: number) => {
-      setParsedIngredients(prev => prev.filter((_, i) => i !== index));
-      ingredientInputRefs.current.splice(index, 1);
-    };
-
-    const handleAddIngredient = () => {
-      const newIndex = parsedIngredients.length;
-      setParsedIngredients(prev => [...prev, ""]);
-      setTimeout(() => { ingredientInputRefs.current[newIndex]?.focus(); }, 50);
-    };
-
     return (
-      <KeyboardAvoidingView
-        style={styles.reviewKAV}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
+      <View style={styles.reviewKAV}>
         <ScrollView
           style={styles.reviewScroll}
           contentContainerStyle={styles.reviewScrollContent}
-          keyboardShouldPersistTaps="handled"
         >
           <Text style={styles.formTitle}>🧴 Review Ingredients</Text>
           <Text style={styles.stepText}>Step 3 of 3 — Confirm ingredient list</Text>
@@ -730,73 +698,40 @@ export default function HomeScreen() {
           )}
 
           <Text style={styles.formSubtitle}>
-            Please check these match your product label before saving.
+            Check these match your product label. Flag for QC if anything looks off.
           </Text>
 
           <View style={styles.ingredientList}>
             {parsedIngredients.map((ingredient, index) => (
-              <View key={index} style={styles.editableIngredientRow}>
-                <Text style={styles.editableIngredientNumber}>{index + 1}.</Text>
-                <TextInput
-                  ref={ref => { ingredientInputRefs.current[index] = ref; }}
-                  style={styles.editableIngredientInput}
-                  value={ingredient}
-                  onChangeText={text => handleUpdateIngredient(index, text)}
-                  placeholder="Ingredient name"
-                  placeholderTextColor="#bbb"
-                  autoCapitalize="none"
-                  returnKeyType="next"
-                  onSubmitEditing={() => {
-                    const next = ingredientInputRefs.current[index + 1];
-                    if (next) next.focus();
-                    else handleAddIngredient();
-                  }}
-                />
-                <TouchableOpacity
-                  style={styles.deleteIngredientButton}
-                  onPress={() => handleDeleteIngredient(index)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text style={styles.deleteIngredientText}>✕</Text>
-                </TouchableOpacity>
+              <View key={index} style={styles.readOnlyIngredientRow}>
+                <Text style={styles.readOnlyIngredientNumber}>{index + 1}.</Text>
+                <Text style={styles.readOnlyIngredientText}>{ingredient}</Text>
               </View>
             ))}
-
-            <TouchableOpacity style={styles.addIngredientButton} onPress={handleAddIngredient}>
-              <Text style={styles.addIngredientText}>＋ Add Ingredient</Text>
-            </TouchableOpacity>
           </View>
         </ScrollView>
-
-        {keyboardVisible && (
-          <View style={styles.keyboardToolbar}>
-            <TouchableOpacity onPress={() => Keyboard.dismiss()}>
-              <Text style={styles.keyboardToolbarDone}>Done ✓</Text>
-            </TouchableOpacity>
-          </View>
-        )}
 
         <View style={styles.reviewFooter}>
           {saving ? (
             <View style={styles.parsingContainer}>
               <ActivityIndicator size="large" color="#007AFF" />
-              <Text style={styles.parsingText}>Uploading & converting ingredients...</Text>
+              <Text style={styles.parsingText}>Uploading & saving...</Text>
             </View>
           ) : (
             <>
-              <TouchableOpacity
-                style={[styles.saveButton, hasEmpty && styles.buttonDisabled]}
-                onPress={hasEmpty ? undefined : handleConfirmSave}
-              >
-                <Text style={styles.saveButtonText}>✅ Save All {count} Ingredients</Text>
-              </TouchableOpacity>
               <TouchableOpacity style={styles.retakeIngredientButton} onPress={handleRetake}>
                 <Text style={styles.retakeIngredientText}>📸 Retake Photo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.flagButton} onPress={() => handleConfirmSave("flagged")}>
+                <Text style={styles.flagButtonText}>⚠️ Flag for QC</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.saveButton, { marginTop: 10 }]} onPress={() => handleConfirmSave("pending")}>
+                <Text style={styles.saveButtonText}>✅ Save</Text>
               </TouchableOpacity>
             </>
           )}
         </View>
-      </KeyboardAvoidingView>
+      </View>
     );
   }
 
@@ -902,18 +837,14 @@ const styles = StyleSheet.create({
   reviewScroll: { flex: 1 },
   reviewScrollContent: { padding: 25, paddingTop: 60, paddingBottom: 16 },
   reviewFooter: { backgroundColor: "white", paddingHorizontal: 25, paddingBottom: 30, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#f0f0f0" },
-  keyboardToolbar: { backgroundColor: "#f2f2f7", borderTopWidth: 1, borderTopColor: "#c8c8cc", paddingHorizontal: 16, paddingVertical: 8, flexDirection: "row", justifyContent: "flex-end", alignItems: "center" },
-  keyboardToolbarDone: { color: "#007AFF", fontSize: 16, fontWeight: "600" },
   ingredientCount: { fontSize: 18, fontWeight: "700", color: "#333", marginTop: 12, marginBottom: 8 },
   ingredientWarning: { fontSize: 14, color: "#c0392b", backgroundColor: "#fdecea", borderRadius: 8, padding: 10, marginBottom: 16, lineHeight: 20 },
   ingredientList: { marginBottom: 12 },
-  editableIngredientRow: { flexDirection: "row", alignItems: "center", backgroundColor: "#f4f4f4", borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginBottom: 6 },
-  editableIngredientNumber: { fontSize: 13, color: "#999", width: 28, flexShrink: 0 },
-  editableIngredientInput: { flex: 1, fontSize: 14, color: "#333", paddingVertical: 4 },
-  deleteIngredientButton: { paddingLeft: 8 },
-  deleteIngredientText: { fontSize: 15, color: "#bbb", fontWeight: "600" },
-  addIngredientButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: "#d0d0d0", borderStyle: "dashed", marginTop: 4 },
-  addIngredientText: { fontSize: 14, color: "#888", fontWeight: "500" },
+  readOnlyIngredientRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: "#f0f0f0" },
+  readOnlyIngredientNumber: { fontSize: 13, color: "#999", width: 28, flexShrink: 0, marginTop: 1 },
+  readOnlyIngredientText: { flex: 1, fontSize: 14, color: "#333", lineHeight: 20 },
+  flagButton: { backgroundColor: "#fff9e6", borderWidth: 1, borderColor: "#f39c12", borderRadius: 10, paddingVertical: 15, alignItems: "center", marginTop: 10 },
+  flagButtonText: { color: "#e67e22", fontSize: 16, fontWeight: "700" },
   retakeIngredientButton: { padding: 15, alignItems: "center", marginTop: 8, borderWidth: 1, borderColor: "#007AFF", borderRadius: 10 },
   retakeIngredientText: { color: "#007AFF", fontSize: 16, fontWeight: "600" },
 });
