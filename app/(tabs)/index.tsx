@@ -8,6 +8,9 @@ import {
   Alert,
   Button,
   Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -76,6 +79,10 @@ export default function HomeScreen() {
   const lastScan = useRef<{ barcode: string; time: number } | null>(null);
   // Prevents concurrent barcode processing — ref (not state) so it's synchronously reliable
   const isProcessing = useRef(false);
+
+  const [manualBarcodeVisible, setManualBarcodeVisible] = useState(false);
+  const [manualBarcodeInput, setManualBarcodeInput] = useState("");
+  const [manualBarcodeSearching, setManualBarcodeSearching] = useState(false);
 
   // ─── HELPERS ───────────────────────────────────────────────────────────────
 
@@ -418,6 +425,20 @@ export default function HomeScreen() {
 
     // Fire and forget — errors are handled inside processBarcodeScan
     processBarcodeScan(data);
+  };
+
+  // ─── MANUAL BARCODE ENTRY ──────────────────────────────────────────────────
+
+  const handleManualBarcodeSearch = async () => {
+    const trimmed = manualBarcodeInput.trim();
+    if (!trimmed) return;
+    setManualBarcodeSearching(true);
+    setScannedBarcode(trimmed);
+    isProcessing.current = true;
+    await processBarcodeScan(trimmed);
+    setManualBarcodeSearching(false);
+    setManualBarcodeVisible(false);
+    setManualBarcodeInput("");
   };
 
   // ─── SCREENS ───────────────────────────────────────────────────────────────
@@ -775,8 +796,65 @@ export default function HomeScreen() {
           <Text style={styles.instructionSubText}>
             Hold steady — curved bottles may need extra time
           </Text>
+          <TouchableOpacity
+            style={styles.manualEntryButton}
+            onPress={() => setManualBarcodeVisible(true)}
+          >
+            <Text style={styles.manualEntryText}>Can't scan barcode? Enter manually</Text>
+          </TouchableOpacity>
         </View>
       </View>
+
+      <Modal
+        visible={manualBarcodeVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => { setManualBarcodeVisible(false); setManualBarcodeInput(""); }}
+      >
+        <View style={styles.manualBackdrop}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFillObject}
+            onPress={() => { setManualBarcodeVisible(false); setManualBarcodeInput(""); }}
+          />
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
+            <View style={styles.manualSheet}>
+              <Text style={styles.manualSheetTitle}>Enter Barcode Number</Text>
+              <TextInput
+                style={styles.manualSheetInput}
+                value={manualBarcodeInput}
+                onChangeText={setManualBarcodeInput}
+                keyboardType="number-pad"
+                placeholder="e.g. 5000157024671"
+                placeholderTextColor="#bbb"
+                autoFocus
+                returnKeyType="search"
+                onSubmitEditing={handleManualBarcodeSearch}
+              />
+              {manualBarcodeSearching ? (
+                <View style={styles.manualSheetLoading}>
+                  <ActivityIndicator color="#007AFF" />
+                  <Text style={styles.manualSheetLoadingText}>Searching...</Text>
+                </View>
+              ) : (
+                <>
+                  <TouchableOpacity
+                    style={styles.manualSheetSearchButton}
+                    onPress={handleManualBarcodeSearch}
+                  >
+                    <Text style={styles.manualSheetSearchText}>Search</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.manualSheetCancelButton}
+                    onPress={() => { setManualBarcodeVisible(false); setManualBarcodeInput(""); }}
+                  >
+                    <Text style={styles.manualSheetCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -858,4 +936,18 @@ const styles = StyleSheet.create({
   flagButtonText: { color: "#e67e22", fontSize: 16, fontWeight: "700" },
   retakeIngredientButton: { padding: 15, alignItems: "center", marginTop: 8, borderWidth: 1, borderColor: "#007AFF", borderRadius: 10 },
   retakeIngredientText: { color: "#007AFF", fontSize: 16, fontWeight: "600" },
+
+  // Manual barcode entry
+  manualEntryButton: { marginTop: 20, paddingVertical: 8, paddingHorizontal: 16 },
+  manualEntryText: { color: "rgba(255,255,255,0.7)", fontSize: 14, textDecorationLine: "underline", textAlign: "center" },
+  manualBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  manualSheet: { backgroundColor: "white", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 36 },
+  manualSheetTitle: { fontSize: 18, fontWeight: "700", color: "#333", marginBottom: 16, textAlign: "center" },
+  manualSheetInput: { borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 14, fontSize: 22, textAlign: "center", letterSpacing: 3, color: "#333", backgroundColor: "#f9f9f9", marginBottom: 16 },
+  manualSheetSearchButton: { backgroundColor: "#007AFF", borderRadius: 10, padding: 15, alignItems: "center", marginBottom: 10 },
+  manualSheetSearchText: { color: "white", fontSize: 16, fontWeight: "700" },
+  manualSheetCancelButton: { padding: 12, alignItems: "center" },
+  manualSheetCancelText: { color: "#888", fontSize: 16 },
+  manualSheetLoading: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 16, gap: 10 },
+  manualSheetLoadingText: { color: "#555", fontSize: 15 },
 });
