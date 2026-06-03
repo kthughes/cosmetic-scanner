@@ -1,3 +1,4 @@
+// Cleaned up on 2026-06-03
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -63,6 +64,7 @@ export default function QCScreen() {
   const [editProductType, setEditProductType] = useState("");
   const [editIngredients, setEditIngredients] = useState<EditIngredient[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [ingredientTexts, setIngredientTexts] = useState<Record<string, string>>({});
 
   // ─── PIN GATE ─────────────────────────────────────────────────
   const handlePinSubmit = () => {
@@ -114,6 +116,15 @@ export default function QCScreen() {
         );
 
         setProducts(combined);
+
+        const texts: Record<string, string> = {};
+        combined.forEach(p => {
+          texts[p.id] = [...(p.product_ingredients ?? [])]
+            .sort((a, b) => a.position - b.position)
+            .map(i => i.ingredient_name)
+            .join(", ");
+        });
+        setIngredientTexts(texts);
       } catch (e) {
         // Network-level failure
         Alert.alert("Connection error", "Could not load products. Please check your internet connection.");
@@ -134,9 +145,31 @@ export default function QCScreen() {
   // ─── APPROVE ──────────────────────────────────────────────────
   const handleApprove = async (productId: string) => {
     try {
+      const rawText = ingredientTexts[productId] ?? "";
+      const newIngredients = rawText
+        .split(",")
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+
+      await supabase.from("product_ingredients").delete().eq("product_id", productId);
+
+      if (newIngredients.length > 0) {
+        const rows = newIngredients.map((name, index) => ({
+          product_id: productId,
+          ingredient_name: name,
+          raw_text: name,
+          position: index + 1,
+        }));
+        const { error: insertError } = await supabase.from("product_ingredients").insert(rows);
+        if (insertError) {
+          Alert.alert("Error saving ingredients", insertError.message);
+          return;
+        }
+      }
+
       const { error } = await supabase
         .from("products")
-        .update({ qc_status: "approved" })
+        .update({ qc_status: "approved", status: "verified" })
         .eq("id", productId);
       if (error) {
         Alert.alert("Error", error.message);
@@ -176,6 +209,7 @@ export default function QCScreen() {
           variant: editVariant.trim() || null,
           product_type: editProductType.trim(),
           qc_status: "approved",
+          status: "verified",
         })
         .eq("id", editingProduct.id);
 
@@ -395,8 +429,6 @@ export default function QCScreen() {
             return 0;
           })
           .map(product => {
-          const ingredients = [...(product.product_ingredients ?? [])]
-            .sort((a, b) => a.position - b.position);
           const ingredientPhotoUrl = product.ingredientPhotoUrl;
           const date = new Date(product.created_at).toLocaleDateString("en-GB", {
             day: "numeric", month: "short", year: "numeric",
@@ -464,16 +496,20 @@ export default function QCScreen() {
               ) : null}
 
               {/* Ingredient list */}
-              {ingredients.length > 0 && (
-                <View style={styles.ingredientSection}>
-                  <Text style={styles.ingredientSectionTitle}>
-                    Ingredients ({ingredients.length})
-                  </Text>
-                  <Text style={styles.ingredientList}>
-                    {ingredients.map(i => i.ingredient_name).join(", ")}
-                  </Text>
-                </View>
-              )}
+              <View style={styles.ingredientSection}>
+                <Text style={styles.ingredientSectionTitle}>Ingredients</Text>
+                <TextInput
+                  style={styles.ingredientInput}
+                  multiline
+                  value={ingredientTexts[product.id] ?? ""}
+                  onChangeText={text =>
+                    setIngredientTexts(prev => ({ ...prev, [product.id]: text }))
+                  }
+                  placeholder="No ingredients"
+                  placeholderTextColor="#bbb"
+                  autoCapitalize="none"
+                />
+              </View>
 
               {/* Actions */}
               <View style={styles.actionRow}>
@@ -730,10 +766,17 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     marginBottom: 8,
   },
-  ingredientList: {
+  ingredientInput: {
     fontSize: 15,
     color: "#444",
     lineHeight: 23,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 6,
+    padding: 10,
+    minHeight: 80,
+    backgroundColor: "white",
+    textAlignVertical: "top",
   },
 
   // ─── FLAGGED BANNER ────────────────────────────────────────────

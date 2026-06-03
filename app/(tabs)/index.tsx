@@ -1,7 +1,8 @@
+// Cleaned up on 2026-06-03
 import { decode } from "base64-arraybuffer";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -251,13 +252,22 @@ export default function HomeScreen() {
     setSaving(true);
 
     try {
-      const filename = `${scannedBarcode}_${Date.now()}.jpg`;
+      const sanitize = (s: string) =>
+        s.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+      const nameParts = [brand, productName, variant]
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(sanitize);
+      const filename = `${nameParts.join("_")}_${Date.now()}.jpg`;
 
       // Upload both photos in parallel — falls back to null if either fails
       const [productPhotoUrl, ingredientPhotoUrl] = await Promise.all([
         productPhotoBase64 ? uploadPhotoBase64(productPhotoBase64, "product-photo", filename) : Promise.resolve(null),
         ingredientPhotoBase64 ? uploadPhotoBase64(ingredientPhotoBase64, "ingredients-photo", filename) : Promise.resolve(null),
       ]);
+
+      // -- Run in Supabase: ALTER TABLE products ADD COLUMN ingredient_image_url text;
+      // -- Run in Supabase: DROP VIEW products_with_ingredients; recreate with ingredient_image_url included
 
       // Insert the product record
       const { data: newProduct, error: productError } = await supabase
@@ -272,6 +282,7 @@ export default function HomeScreen() {
           qc_status: qcStatus,
           scanned_by: scannedBy,
           product_image_url: productPhotoUrl,
+          ingredient_image_url: ingredientPhotoUrl,
         }])
         .select()
         .single();

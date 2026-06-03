@@ -1,3 +1,4 @@
+// Cleaned up on 2026-06-03
 import { Tabs } from 'expo-router';
 import React from 'react';
 
