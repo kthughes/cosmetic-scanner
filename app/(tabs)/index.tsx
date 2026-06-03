@@ -310,16 +310,23 @@ export default function HomeScreen() {
 
       // Insert raw ingredient text — INCI names will be patched in the background
       if (parsedIngredients.length > 0) {
-        const rows = parsedIngredients.map((text, index) => ({
+        await supabase.from("product_ingredients").delete().eq("product_id", newProductId);
+
+        const rows = parsedIngredients.map((text: string, index: number) => ({
           product_id: newProductId,
           ingredient_name: text,
           raw_text: text,
           position: index + 1,
-        }));
+          brand: brand.trim(),
+          product_name: productName.trim(),
+          variant: variant.trim() || null,
+        })).sort((a, b) => a.position - b.position);
 
         const { error: ingredientsError } = await supabase
           .from("product_ingredients")
-          .insert(rows);
+          .insert(rows)
+          .select()
+          .order("position");
 
         if (ingredientsError) {
           console.warn("[save] Failed to save ingredients:", ingredientsError.message);
