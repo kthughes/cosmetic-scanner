@@ -1,8 +1,9 @@
 // Cleaned up on 2026-06-03
 import { decode } from "base64-arraybuffer";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -70,6 +71,8 @@ export default function HomeScreen() {
 
   const [ingredientPhoto, setIngredientPhoto] = useState<string | null>(null);
   const [ingredientPhotoBase64, setIngredientPhotoBase64] = useState<string | null>(null);
+  const [ingredientPhoto2, setIngredientPhoto2] = useState<string | null>(null);
+  const [ingredientPhotoBase64_2, setIngredientPhotoBase64_2] = useState<string | null>(null);
 
   const [parsedIngredients, setParsedIngredients] = useState<string[]>([]);
 
@@ -84,7 +87,43 @@ export default function HomeScreen() {
   const [manualBarcodeInput, setManualBarcodeInput] = useState("");
   const [manualBarcodeSearching, setManualBarcodeSearching] = useState(false);
 
+  const [countToday, setCountToday] = useState(0);
+  const [countTotal, setCountTotal] = useState(0);
+
+  // ─── COUNTS ────────────────────────────────────────────────────────────────
+
+  const fetchCounts = async (name: string) => {
+    if (!name) return;
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const [{ count: todayCount }, { count: totalCount }] = await Promise.all([
+      supabase
+        .from("products")
+        .select("*", { count: "exact", head: true })
+        .eq("scanned_by", name)
+        .gte("created_at", startOfDay.toISOString()),
+      supabase
+        .from("products")
+        .select("*", { count: "exact", head: true })
+        .eq("scanned_by", name),
+    ]);
+    setCountToday(todayCount ?? 0);
+    setCountTotal(totalCount ?? 0);
+  };
+
+  useEffect(() => {
+    if (scannedBy) fetchCounts(scannedBy);
+  }, [scannedBy]);
+
   // ─── HELPERS ───────────────────────────────────────────────────────────────
+
+  const compressForGPT = async (uri: string): Promise<string> => {
+    const imageRef = await ImageManipulator.manipulate(uri)
+      .resize({ width: 1024 })
+      .renderAsync();
+    const result = await imageRef.saveAsync({ compress: 0.7, format: SaveFormat.JPEG, base64: true });
+    return result.base64 ?? "";
+  };
 
   const uploadPhotoBase64 = async (
     base64: string,
@@ -159,7 +198,19 @@ export default function HomeScreen() {
     };
   };
 
-  const parseIngredientsWithGPT = async (base64Image: string): Promise<string[]> => {
+  const parseIngredientsWithGPT = async (base64Image1: string, base64Image2?: string): Promise<string[]> => {
+    const imageContent: object[] = [
+      { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image1}`, detail: "high" } },
+      ...(base64Image2
+        ? [{ type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image2}`, detail: "high" } }]
+        : []),
+      {
+        type: "text",
+        text: base64Image2
+          ? 'These images show the ingredient list of a cosmetic product, possibly continuing across both images. Read all visible ingredients from both images and return them as a single combined ordered list. Return ONLY a JSON object with one field: "ingredients" (a JSON array of strings in the order they appear). Example: {"ingredients": ["Water", "Glycerin", "Sodium Lauryl Sulfate"]}. Do not include any explanation or other text — only the JSON object.'
+          : 'Extract all ingredients from this cosmetic product label exactly as they appear — do not convert to INCI or change the spelling. Do NOT guess any ingredient you cannot read clearly. If a word is unclear or uncertain, skip it entirely rather than guessing. Never invent ingredient names. Return ONLY a JSON object with one field: "ingredients" (a JSON array of strings in the order they appear on the label). Example: {"ingredients": ["Water", "Glycerin", "Sodium Lauryl Sulfate"]}. Do not include any explanation or other text — only the JSON object.',
+      },
+    ];
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -168,19 +219,7 @@ export default function HomeScreen() {
       },
       body: JSON.stringify({
         model: "gpt-4o",
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: `data:image/jpeg;base64,${base64Image}`, detail: "high" },
-            },
-            {
-              type: "text",
-              text: 'Extract all ingredients from this cosmetic product label exactly as they appear — do not convert to INCI or change the spelling. Do NOT guess any ingredient you cannot read clearly. If a word is unclear or uncertain, skip it entirely rather than guessing. Never invent ingredient names. Return ONLY a JSON object with one field: "ingredients" (a JSON array of strings in the order they appear on the label). Example: {"ingredients": ["Water", "Glycerin", "Sodium Lauryl Sulfate"]}. Do not include any explanation or other text — only the JSON object.',
-            },
-          ],
-        }],
+        messages: [{ role: "user", content: imageContent }],
         max_tokens: 1000,
       }),
     });
@@ -243,6 +282,8 @@ export default function HomeScreen() {
     setVariant("");
     setIngredientPhoto(null);
     setIngredientPhotoBase64(null);
+    setIngredientPhoto2(null);
+    setIngredientPhotoBase64_2(null);
     setParsedIngredients([]);
     lastScan.current = null;
     isProcessing.current = false;
@@ -265,16 +306,18 @@ export default function HomeScreen() {
         .map(s => s.trim())
         .filter(Boolean)
         .map(sanitize);
-      const filename = `${nameParts.join("_")}_${Date.now()}.jpg`;
+      const baseFilename = `${nameParts.join("_")}_${Date.now()}`;
 
-      // Upload both photos in parallel — falls back to null if either fails
-      const [productPhotoUrl, ingredientPhotoUrl] = await Promise.all([
-        productPhotoBase64 ? uploadPhotoBase64(productPhotoBase64, "product-photo", filename) : Promise.resolve(null),
-        ingredientPhotoBase64 ? uploadPhotoBase64(ingredientPhotoBase64, "ingredients-photo", filename) : Promise.resolve(null),
+      // Upload all photos in parallel — falls back to null if any fail
+      const [productPhotoUrl, ingredientPhotoUrl, ingredientPhotoUrl2] = await Promise.all([
+        productPhotoBase64 ? uploadPhotoBase64(productPhotoBase64, "product-photo", `${baseFilename}.jpg`) : Promise.resolve(null),
+        ingredientPhotoBase64 ? uploadPhotoBase64(ingredientPhotoBase64, "ingredients-photo", `${baseFilename}_ingredients1.jpg`) : Promise.resolve(null),
+        ingredientPhotoBase64_2 ? uploadPhotoBase64(ingredientPhotoBase64_2, "ingredients-photo", `${baseFilename}_ingredients2.jpg`) : Promise.resolve(null),
       ]);
 
       // -- Run in Supabase: ALTER TABLE products ADD COLUMN ingredient_image_url text;
-      // -- Run in Supabase: DROP VIEW products_with_ingredients; recreate with ingredient_image_url included
+      // -- Run in Supabase: ALTER TABLE products ADD COLUMN ingredient_image_url_2 text;
+      // -- Run in Supabase: DROP VIEW products_with_ingredients; recreate with ingredient_image_url, ingredient_image_url_2 included
 
       // Insert the product record
       const { data: newProduct, error: productError } = await supabase
@@ -290,6 +333,7 @@ export default function HomeScreen() {
           scanned_by: scannedBy,
           product_image_url: productPhotoUrl,
           ingredient_image_url: ingredientPhotoUrl,
+          ingredient_image_url_2: ingredientPhotoUrl2,
         }])
         .select()
         .single();
@@ -314,6 +358,7 @@ export default function HomeScreen() {
 
         const rows = parsedIngredients.map((text: string, index: number) => ({
           product_id: newProductId,
+          barcode: scannedBarcode,
           ingredient_name: text,
           raw_text: text,
           position: index + 1,
@@ -341,6 +386,7 @@ export default function HomeScreen() {
       const ingredientsSnapshot = [...parsedIngredients];
 
       handleScanAgain();
+      fetchCounts(scannedBy);
       Alert.alert(
         qcStatus === "flagged" ? "Flagged for review — thank you!" : "All saved! ✅",
         "Thank you for building the database!",
@@ -376,10 +422,6 @@ export default function HomeScreen() {
   // Async DB work for a confirmed barcode — called by handleBarcodeScan below.
   const processBarcodeScan = async (data: string) => {
     try {
-      // Record the scan event — errors here are non-fatal; the product lookup still proceeds
-      const { error: scanError } = await supabase.from("scans").insert([{ barcode: data }]);
-      if (scanError) console.warn("[scan] Failed to insert scan record:", scanError.message);
-
       // Check if this barcode already exists in the database.
       // maybeSingle returns { data: null, error: null } when no rows match, so we can
       // distinguish "not found" (expected) from an actual DB/network error.
@@ -400,6 +442,9 @@ export default function HomeScreen() {
         setProductFound(product);
         setScreen("productFound");
       } else {
+        // Only insert a scan record for new products — the row is linked to the product in handleConfirmSave
+        const { error: scanError } = await supabase.from("scans").insert([{ barcode: data }]);
+        if (scanError) console.warn("[scan] Failed to insert scan record:", scanError.message);
         setProductFound(null);
         setScreen("photoProduct");
       }
@@ -529,10 +574,11 @@ export default function HomeScreen() {
     };
 
     const handleAnalyseProductPhoto = async () => {
-      if (!productPhotoBase64) return;
+      if (!productPhoto) return;
       setParsing(true);
       try {
-        const details = await parseProductDetailsWithGPT(productPhotoBase64);
+        const compressed = await compressForGPT(productPhoto);
+        const details = await parseProductDetailsWithGPT(compressed);
         setBrand(details.brand);
         setProductName(details.name);
         setProductType(details.product_type);
@@ -628,7 +674,7 @@ export default function HomeScreen() {
     );
   }
 
-  // Step 3 — photograph ingredients label
+  // Step 3 — photograph ingredients label (supports up to 2 photos)
   if (screen === "photoIngredients") {
     const handleTakeIngredientPhoto = async () => {
       try {
@@ -641,6 +687,25 @@ export default function HomeScreen() {
         if (!result.canceled && result.assets[0]) {
           setIngredientPhoto(result.assets[0].uri);
           setIngredientPhotoBase64(result.assets[0].base64 ?? null);
+          setIngredientPhoto2(null);
+          setIngredientPhotoBase64_2(null);
+        }
+      } catch {
+        Alert.alert("Error opening camera", "Please try again");
+      }
+    };
+
+    const handleTakeIngredientPhoto2 = async () => {
+      try {
+        const result = await ImagePicker.launchCameraAsync({
+          quality: 0.8,
+          allowsEditing: false,
+          mediaTypes: ["images"],
+          base64: true,
+        });
+        if (!result.canceled && result.assets[0]) {
+          setIngredientPhoto2(result.assets[0].uri);
+          setIngredientPhotoBase64_2(result.assets[0].base64 ?? null);
         }
       } catch {
         Alert.alert("Error opening camera", "Please try again");
@@ -648,10 +713,14 @@ export default function HomeScreen() {
     };
 
     const handleAnalyseIngredients = async () => {
-      if (!ingredientPhotoBase64) return;
+      if (!ingredientPhoto) return;
       setParsing(true);
       try {
-        const ingredients = await parseIngredientsWithGPT(ingredientPhotoBase64);
+        const [compressed1, compressed2] = await Promise.all([
+          compressForGPT(ingredientPhoto),
+          ingredientPhoto2 ? compressForGPT(ingredientPhoto2) : Promise.resolve(undefined as string | undefined),
+        ]);
+        const ingredients = await parseIngredientsWithGPT(compressed1, compressed2);
         setParsedIngredients(ingredients);
         setScreen("reviewIngredients");
       } catch {
@@ -661,43 +730,53 @@ export default function HomeScreen() {
       }
     };
 
-    return (
-      <View style={styles.formContainer}>
-        <Text style={styles.formTitle}>📸 Photograph Ingredients</Text>
-        <Text style={styles.stepText}>Step 3 of 3 — Ingredients list</Text>
-        <Text style={styles.formSubtitle}>
-          Take a clear photo of the full ingredients list. Make sure all text is visible and in focus.
-        </Text>
-
-        {ingredientPhoto ? (
-          <View style={styles.photoContainer}>
-            <Image source={{ uri: ingredientPhoto }} style={styles.photoPreview} resizeMode="cover" />
-            {parsing ? (
-              <View style={styles.parsingContainer}>
-                <ActivityIndicator size="large" color="#007AFF" />
-                <Text style={styles.parsingText}>Analysing ingredients with AI...</Text>
-              </View>
-            ) : (
-              <>
-                <TouchableOpacity style={styles.retakeButton} onPress={handleTakeIngredientPhoto}>
-                  <Text style={styles.retakeText}>Retake Photo</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.saveButton} onPress={handleAnalyseIngredients}>
-                  <Text style={styles.saveButtonText}>Analyse Ingredients →</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        ) : (
+    if (!ingredientPhoto) {
+      return (
+        <View style={styles.formContainer}>
+          <Text style={styles.formTitle}>📸 Photograph Ingredients</Text>
+          <Text style={styles.stepText}>Step 3 of 3 — Ingredients list</Text>
+          <Text style={styles.formSubtitle}>
+            Take a clear photo of the full ingredients list. Make sure all text is visible and in focus.
+          </Text>
           <TouchableOpacity style={styles.photoButton} onPress={handleTakeIngredientPhoto}>
             <Text style={styles.photoButtonText}>📷 Take Photo of Ingredients</Text>
           </TouchableOpacity>
-        )}
+          <TouchableOpacity style={styles.cancelButton} onPress={() => setScreen("reviewProduct")}>
+            <Text style={styles.cancelText}>← Back to Review</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
 
-        <TouchableOpacity style={styles.cancelButton} onPress={() => setScreen("reviewProduct")}>
-          <Text style={styles.cancelText}>← Back to Review</Text>
-        </TouchableOpacity>
-      </View>
+    return (
+      <ScrollView contentContainerStyle={styles.ingredientPhotoScreenContent}>
+        <Text style={styles.formTitle}>📸 Photograph Ingredients</Text>
+        <Text style={styles.stepText}>Step 3 of 3 — Ingredients list</Text>
+        <Image source={{ uri: ingredientPhoto }} style={styles.photoPreview} resizeMode="cover" />
+        {ingredientPhoto2 && (
+          <Image source={{ uri: ingredientPhoto2 }} style={[styles.photoPreview, { marginTop: 8 }]} resizeMode="cover" />
+        )}
+        {parsing ? (
+          <View style={styles.parsingContainer}>
+            <ActivityIndicator size="large" color="#007AFF" />
+            <Text style={styles.parsingText}>Analysing ingredients with AI...</Text>
+          </View>
+        ) : (
+          <>
+            {!ingredientPhoto2 && (
+              <TouchableOpacity style={styles.addPhotoButton} onPress={handleTakeIngredientPhoto2}>
+                <Text style={styles.addPhotoButtonText}>📸 Add Another Photo</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={[styles.saveButton, { marginTop: 12 }]} onPress={handleAnalyseIngredients}>
+              <Text style={styles.saveButtonText}>✅ Continue</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelButton} onPress={() => setScreen("reviewProduct")}>
+              <Text style={styles.cancelText}>← Back to Review</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </ScrollView>
     );
   }
 
@@ -710,6 +789,8 @@ export default function HomeScreen() {
     const handleRetake = () => {
       setIngredientPhoto(null);
       setIngredientPhotoBase64(null);
+      setIngredientPhoto2(null);
+      setIngredientPhotoBase64_2(null);
       setParsedIngredients([]);
       setScreen("photoIngredients");
     };
@@ -781,12 +862,14 @@ export default function HomeScreen() {
         style={styles.camera}
         onBarcodeScanned={handleBarcodeScan}
         barcodeScannerSettings={{
-          barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e", "code128", "code39", "pdf417", "qr"],
+          barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"],
         }}
       />
       <View style={styles.overlay}>
         <View style={styles.topOverlay}>
-          <Text style={styles.scannerName}>👤 {scannedBy}</Text>
+          <Text style={styles.scannerBanner}>
+            👤 {scannedBy}{"  |  "}Today: {countToday}{"  |  "}Total: {countTotal}
+          </Text>
         </View>
         <View style={styles.middleRow}>
           <View style={styles.sideOverlay} />
@@ -874,7 +957,7 @@ const styles = StyleSheet.create({
   camera: { flex: 1 },
   overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, flexDirection: "column" },
   topOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "flex-end", paddingBottom: 10 },
-  scannerName: { color: "white", fontSize: 14, opacity: 0.8 },
+  scannerBanner: { color: "white", fontSize: 13, opacity: 0.75, textAlign: "center" },
   middleRow: { flexDirection: "row", height: 200 },
   sideOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
   targetBox: { width: 280, height: 200, borderColor: "transparent", borderWidth: 2 },
@@ -922,6 +1005,9 @@ const styles = StyleSheet.create({
   photoButtonText: { color: "white", fontSize: 18, fontWeight: "bold" },
   photoContainer: { marginTop: 15, alignItems: "center", width: "100%" },
   photoPreview: { width: "100%", height: 200, borderRadius: 10, marginBottom: 15 },
+  ingredientPhotoScreenContent: { padding: 25, paddingTop: 60, paddingBottom: 40, backgroundColor: "white" },
+  addPhotoButton: { backgroundColor: "#fff", borderWidth: 1.5, borderColor: "#007AFF", borderRadius: 10, padding: 15, alignItems: "center", marginTop: 10 },
+  addPhotoButtonText: { color: "#007AFF", fontSize: 16, fontWeight: "600" },
   thumbPreview: { width: "100%", height: 120, borderRadius: 10, marginBottom: 5, marginTop: 8 },
   retakeButton: { padding: 10, marginBottom: 5 },
   retakeText: { color: "#007AFF", fontSize: 16 },

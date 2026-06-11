@@ -37,6 +37,8 @@ interface PendingProduct {
   scanned_by: string;
   created_at: string;
   product_image_url: string | null;
+  ingredient_image_url: string | null;
+  ingredient_image_url_2: string | null;
   qc_status: "pending" | "flagged";
   product_ingredients: Ingredient[];
   ingredientPhotoUrl: string | null;
@@ -492,6 +494,23 @@ export default function QCScreen() {
                       resizeMode="cover"
                     />
                   </ScrollView>
+                  {product.ingredient_image_url_2 ? (
+                    <ScrollView
+                      style={[styles.ingredientPhotoScroll, { marginTop: 8 }]}
+                      maximumZoomScale={4}
+                      minimumZoomScale={1}
+                      bouncesZoom
+                      showsHorizontalScrollIndicator={false}
+                      showsVerticalScrollIndicator={false}
+                      centerContent
+                    >
+                      <Image
+                        source={{ uri: product.ingredient_image_url_2 }}
+                        style={styles.ingredientPhoto}
+                        resizeMode="cover"
+                      />
+                    </ScrollView>
+                  ) : null}
                 </View>
               ) : null}
 
