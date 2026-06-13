@@ -171,7 +171,7 @@ export default function QCScreen() {
 
       const { error } = await supabase
         .from("products")
-        .update({ qc_status: "approved", status: "verified" })
+        .update({ qc_status: "approved" })
         .eq("id", productId);
       if (error) {
         Alert.alert("Error", error.message);
@@ -211,7 +211,6 @@ export default function QCScreen() {
           variant: editVariant.trim() || null,
           product_type: editProductType.trim(),
           qc_status: "approved",
-          status: "verified",
         })
         .eq("id", editingProduct.id);
 

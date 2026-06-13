@@ -328,7 +328,6 @@ export default function HomeScreen() {
           name: productName.trim(),
           product_type: productType.trim(),
           variant: variant.trim() || null,
-          status: "unverified",
           qc_status: qcStatus,
           scanned_by: scannedBy,
           product_image_url: productPhotoUrl,
@@ -546,7 +545,7 @@ export default function HomeScreen() {
         <Text style={styles.foundBrand}>{productFound.brand}</Text>
         <Text style={styles.foundName}>{productFound.name}</Text>
         {productFound.variant && <Text style={styles.foundVariant}>{productFound.variant}</Text>}
-        <Text style={styles.foundStatus}>Status: {productFound.status}</Text>
+
         <TouchableOpacity style={styles.scanAgainButton} onPress={handleScanAgain}>
           <Text style={styles.scanAgainText}>Scan Another Product</Text>
         </TouchableOpacity>
