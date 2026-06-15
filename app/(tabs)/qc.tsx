@@ -3,11 +3,8 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,7 +12,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import DraggableFlatList, { RenderItemParams, ScaleDecorator } from "react-native-draggable-flatlist";
 import { supabase } from "../../lib/supabase";
 
 // TODO: DEVELOPER REVIEW — PIN is hardcoded in plain text. Before production, move this to an
@@ -42,11 +38,7 @@ interface PendingProduct {
   qc_status: "pending" | "flagged";
   product_ingredients: Ingredient[];
   ingredientPhotoUrl: string | null;
-}
-
-interface EditIngredient {
-  id: string;
-  name: string;
+  ingredients_text: string | null;
 }
 
 export default function QCScreen() {
@@ -57,16 +49,6 @@ export default function QCScreen() {
   const [products, setProducts] = useState<PendingProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-
-  // ─── EDIT MODAL STATE ─────────────────────────────────────────
-  const [editingProduct, setEditingProduct] = useState<PendingProduct | null>(null);
-  const [editBrand, setEditBrand] = useState("");
-  const [editName, setEditName] = useState("");
-  const [editVariant, setEditVariant] = useState("");
-  const [editProductType, setEditProductType] = useState("");
-  const [editIngredients, setEditIngredients] = useState<EditIngredient[]>([]);
-  const [savingEdit, setSavingEdit] = useState(false);
-  const [ingredientTexts, setIngredientTexts] = useState<Record<string, string>>({});
 
   // ─── PIN GATE ─────────────────────────────────────────────────
   const handlePinSubmit = () => {
@@ -84,9 +66,7 @@ export default function QCScreen() {
     if (!authed) return;
     const fetchPending = async () => {
       setLoading(true);
-
       try {
-        // Step 1: fetch pending products with their ingredients
         const { data: productData, error: productError } = await supabase
           .from("products")
           .select("*, product_ingredients(ingredient_name, position)")
@@ -95,11 +75,9 @@ export default function QCScreen() {
 
         if (productError) {
           Alert.alert("Error loading products", productError.message);
-          return; // finally block resets loading state
+          return;
         }
 
-        // Step 2: for each product, fetch its most recent scan image separately.
-        // Supabase cannot auto-detect the FK between products and scans, so we query individually.
         const combined: PendingProduct[] = await Promise.all(
           (productData ?? []).map(async (product: any) => {
             const { data: scan } = await supabase
@@ -118,17 +96,7 @@ export default function QCScreen() {
         );
 
         setProducts(combined);
-
-        const texts: Record<string, string> = {};
-        combined.forEach(p => {
-          texts[p.id] = [...(p.product_ingredients ?? [])]
-            .sort((a, b) => a.position - b.position)
-            .map(i => i.ingredient_name)
-            .join(", ");
-        });
-        setIngredientTexts(texts);
       } catch (e) {
-        // Network-level failure
         Alert.alert("Connection error", "Could not load products. Please check your internet connection.");
         console.warn("[qc] fetchPending threw:", e);
       } finally {
@@ -147,28 +115,6 @@ export default function QCScreen() {
   // ─── APPROVE ──────────────────────────────────────────────────
   const handleApprove = async (productId: string) => {
     try {
-      const rawText = ingredientTexts[productId] ?? "";
-      const newIngredients = rawText
-        .split(",")
-        .map(s => s.trim())
-        .filter(s => s.length > 0);
-
-      await supabase.from("product_ingredients").delete().eq("product_id", productId);
-
-      if (newIngredients.length > 0) {
-        const rows = newIngredients.map((name, index) => ({
-          product_id: productId,
-          ingredient_name: name,
-          raw_text: name,
-          position: index + 1,
-        }));
-        const { error: insertError } = await supabase.from("product_ingredients").insert(rows);
-        if (insertError) {
-          Alert.alert("Error saving ingredients", insertError.message);
-          return;
-        }
-      }
-
       const { error } = await supabase
         .from("products")
         .update({ qc_status: "approved" })
@@ -185,65 +131,22 @@ export default function QCScreen() {
     }
   };
 
-  // ─── EDIT ─────────────────────────────────────────────────────
-  const handleOpenEdit = (product: PendingProduct) => {
-    setEditBrand(product.brand);
-    setEditName(product.name);
-    setEditVariant(product.variant ?? "");
-    setEditProductType(product.product_type);
-    setEditIngredients(
-      [...(product.product_ingredients ?? [])]
-        .sort((a, b) => a.position - b.position)
-        .map((ing, i) => ({ id: `${i}-${Date.now()}`, name: ing.ingredient_name }))
-    );
-    setEditingProduct(product);
-  };
-
-  const handleSaveAndApprove = async () => {
-    if (!editingProduct) return;
-    setSavingEdit(true);
+  // ─── FLAG FOR LAPTOP ──────────────────────────────────────────
+  const handleFlag = async (productId: string) => {
     try {
-      const { error: productError } = await supabase
+      const { error } = await supabase
         .from("products")
-        .update({
-          brand: editBrand.trim(),
-          name: editName.trim(),
-          variant: editVariant.trim() || null,
-          product_type: editProductType.trim(),
-          qc_status: "approved",
-        })
-        .eq("id", editingProduct.id);
-
-      if (productError) {
-        Alert.alert("Error", productError.message);
+        .update({ qc_status: "flagged_for_laptop" })
+        .eq("id", productId);
+      if (error) {
+        Alert.alert("Error", error.message);
         return;
       }
-
-      // Replace all ingredients — delete then re-insert to respect position order
-      await supabase.from("product_ingredients").delete().eq("product_id", editingProduct.id);
-
-      if (editIngredients.length > 0) {
-        const rows = editIngredients.map((ing, index) => ({
-          product_id: editingProduct.id,
-          ingredient_name: ing.name,
-          raw_text: ing.name,
-          position: index + 1,
-        }));
-        const { error: insertError } = await supabase.from("product_ingredients").insert(rows);
-        if (insertError) {
-          Alert.alert("Error saving ingredients", insertError.message);
-          return;
-        }
-      }
-
-      setProducts(prev => prev.filter(p => p.id !== editingProduct.id));
-      setEditingProduct(null);
-      showToast("Saved & Approved ✅");
+      setProducts(prev => prev.filter(p => p.id !== productId));
+      showToast("Flagged for laptop 🏳️");
     } catch (e) {
-      Alert.alert("Connection error", "Could not save. Please check your internet connection.");
-      console.warn("[qc] handleSaveAndApprove threw:", e);
-    } finally {
-      setSavingEdit(false);
+      Alert.alert("Connection error", "Could not flag product. Please check your internet connection.");
+      console.warn("[qc] handleFlag threw:", e);
     }
   };
 
@@ -259,7 +162,6 @@ export default function QCScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              // Delete ingredients first to respect FK constraint
               await supabase.from("product_ingredients").delete().eq("product_id", productId);
               const { error } = await supabase.from("products").delete().eq("id", productId);
               if (error) {
@@ -326,123 +228,48 @@ export default function QCScreen() {
     );
   }
 
+  const sortedProducts = [...products].sort((a, b) => {
+    if (a.qc_status === "flagged" && b.qc_status !== "flagged") return -1;
+    if (b.qc_status === "flagged" && a.qc_status !== "flagged") return 1;
+    return 0;
+  });
+
   // ─── PRODUCT LIST ─────────────────────────────────────────────
   return (
     <View style={styles.screen}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>QC Review</Text>
         <Text style={styles.headerCount}>{products.length} pending</Text>
       </View>
 
-      {/* Edit modal */}
-      <Modal visible={!!editingProduct} animationType="slide" presentationStyle="pageSheet">
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setEditingProduct(null)}>
-              <Text style={styles.modalCancel}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Edit Product</Text>
-            <TouchableOpacity onPress={handleSaveAndApprove} disabled={savingEdit}>
-              <Text style={[styles.modalSave, savingEdit && { opacity: 0.4 }]}>💾 Save & Approve</Text>
-            </TouchableOpacity>
-          </View>
-
-          {savingEdit ? (
-            <View style={styles.centeredContainer}>
-              <ActivityIndicator size="large" color="#007AFF" />
-            </View>
-          ) : (
-            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
-              <DraggableFlatList
-                data={editIngredients}
-                keyExtractor={item => item.id}
-                onDragEnd={({ data }) => setEditIngredients(data)}
-                contentContainerStyle={styles.modalScroll}
-                ListHeaderComponent={
-                  <View>
-                    <Text style={styles.modalSectionTitle}>Product Details</Text>
-                    <Text style={styles.modalLabel}>Brand</Text>
-                    <TextInput style={styles.modalInput} value={editBrand} onChangeText={setEditBrand} autoCapitalize="words" />
-                    <Text style={styles.modalLabel}>Name</Text>
-                    <TextInput style={styles.modalInput} value={editName} onChangeText={setEditName} autoCapitalize="words" />
-                    <Text style={styles.modalLabel}>Variant (optional)</Text>
-                    <TextInput style={styles.modalInput} value={editVariant} onChangeText={setEditVariant} autoCapitalize="words" />
-                    <Text style={styles.modalLabel}>Product Type</Text>
-                    <TextInput style={styles.modalInput} value={editProductType} onChangeText={setEditProductType} autoCapitalize="none" />
-                    <Text style={styles.modalSectionTitle}>Ingredients ({editIngredients.length})</Text>
-                    <Text style={styles.modalHint}>Long-press ≡ to drag and reorder</Text>
-                  </View>
-                }
-                ListFooterComponent={
-                  <TouchableOpacity
-                    style={styles.modalAddButton}
-                    onPress={() => setEditIngredients(prev => [...prev, { id: `new-${Date.now()}`, name: "" }])}
-                  >
-                    <Text style={styles.modalAddButtonText}>＋ Add Ingredient</Text>
-                  </TouchableOpacity>
-                }
-                renderItem={({ item, drag, isActive }: RenderItemParams<EditIngredient>) => (
-                  <ScaleDecorator>
-                    <View style={[styles.editIngredientRow, isActive && styles.editIngredientRowActive]}>
-                      <Pressable onLongPress={drag} style={styles.dragHandle}>
-                        <Text style={styles.dragHandleIcon}>≡</Text>
-                      </Pressable>
-                      <TextInput
-                        style={styles.editIngredientInput}
-                        value={item.name}
-                        onChangeText={text =>
-                          setEditIngredients(prev =>
-                            prev.map(i => i.id === item.id ? { ...i, name: text } : i)
-                          )
-                        }
-                        autoCapitalize="none"
-                        placeholder="Ingredient name"
-                        placeholderTextColor="#bbb"
-                      />
-                      <TouchableOpacity
-                        onPress={() => setEditIngredients(prev => prev.filter(i => i.id !== item.id))}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Text style={styles.editIngredientDelete}>✕</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </ScaleDecorator>
-                )}
-              />
-            </KeyboardAvoidingView>
-          )}
-        </View>
-      </Modal>
-
-      {/* Toast */}
       {toast && (
         <View style={styles.toast}>
           <Text style={styles.toastText}>{toast}</Text>
         </View>
       )}
 
-      <ScrollView contentContainerStyle={styles.list}>
-        {[...products]
-          .sort((a, b) => {
-            if (a.qc_status === "flagged" && b.qc_status !== "flagged") return -1;
-            if (b.qc_status === "flagged" && a.qc_status !== "flagged") return 1;
-            return 0;
-          })
-          .map(product => {
-          const ingredientPhotoUrl = product.ingredientPhotoUrl;
+      <FlatList
+        data={sortedProducts}
+        keyExtractor={item => item.id}
+        contentContainerStyle={styles.list}
+        renderItem={({ item: product }) => {
+          const ingredientList = product.ingredients_text
+            ? product.ingredients_text.split(",").map(s => s.trim()).filter(s => s.length > 0)
+            : [...(product.product_ingredients ?? [])]
+                .sort((a, b) => a.position - b.position)
+                .map(i => i.ingredient_name);
+
           const date = new Date(product.created_at).toLocaleDateString("en-GB", {
             day: "numeric", month: "short", year: "numeric",
           });
 
           return (
-            <View key={product.id} style={styles.card}>
+            <View style={styles.card}>
               {product.qc_status === "flagged" && (
                 <View style={styles.flaggedBanner}>
                   <Text style={styles.flaggedBannerText}>🚨 Flagged for Review</Text>
                 </View>
               )}
-              {/* Product header */}
               <Text style={styles.cardBrand}>{product.brand}</Text>
               <Text style={styles.cardName}>{product.name}</Text>
               {product.variant ? (
@@ -450,7 +277,6 @@ export default function QCScreen() {
               ) : null}
               <Text style={styles.cardMeta}>{product.product_type}</Text>
 
-              {/* Meta row */}
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>Scanned by</Text>
                 <Text style={styles.metaValue}>{product.scanned_by}</Text>
@@ -464,7 +290,6 @@ export default function QCScreen() {
                 <Text style={styles.metaValue}>{product.barcode}</Text>
               </View>
 
-              {/* Photos — stacked vertically */}
               {product.product_image_url ? (
                 <View style={styles.photoBlock}>
                   <Text style={styles.photoLabel}>Product</Text>
@@ -475,7 +300,7 @@ export default function QCScreen() {
                   />
                 </View>
               ) : null}
-              {ingredientPhotoUrl ? (
+              {product.ingredientPhotoUrl ? (
                 <View style={styles.photoBlock}>
                   <Text style={styles.photoLabel}>Ingredients — pinch to zoom</Text>
                   <ScrollView
@@ -488,7 +313,7 @@ export default function QCScreen() {
                     centerContent
                   >
                     <Image
-                      source={{ uri: ingredientPhotoUrl }}
+                      source={{ uri: product.ingredientPhotoUrl }}
                       style={styles.ingredientPhoto}
                       resizeMode="cover"
                     />
@@ -513,23 +338,17 @@ export default function QCScreen() {
                 </View>
               ) : null}
 
-              {/* Ingredient list */}
               <View style={styles.ingredientSection}>
-                <Text style={styles.ingredientSectionTitle}>Ingredients</Text>
-                <TextInput
-                  style={styles.ingredientInput}
-                  multiline
-                  value={ingredientTexts[product.id] ?? ""}
-                  onChangeText={text =>
-                    setIngredientTexts(prev => ({ ...prev, [product.id]: text }))
-                  }
-                  placeholder="No ingredients"
-                  placeholderTextColor="#bbb"
-                  autoCapitalize="none"
-                />
+                <Text style={styles.ingredientSectionTitle}>Ingredients ({ingredientList.length})</Text>
+                <View style={styles.ingredientChipsContainer}>
+                  {ingredientList.map((ing, idx) => (
+                    <View key={idx} style={styles.ingredientChip}>
+                      <Text style={styles.ingredientChipText}>{ing}</Text>
+                    </View>
+                  ))}
+                </View>
               </View>
 
-              {/* Actions */}
               <View style={styles.actionRow}>
                 <TouchableOpacity
                   style={styles.approveButton}
@@ -538,10 +357,10 @@ export default function QCScreen() {
                   <Text style={styles.approveText}>✅ Approve</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.editButton}
-                  onPress={() => handleOpenEdit(product)}
+                  style={styles.flagButton}
+                  onPress={() => handleFlag(product.id)}
                 >
-                  <Text style={styles.editText}>✏️ Edit</Text>
+                  <Text style={styles.flagText}>🏳️ Flag for Review</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.removeButton}
@@ -552,8 +371,8 @@ export default function QCScreen() {
               </View>
             </View>
           );
-        })}
-      </ScrollView>
+        }}
+      />
     </View>
   );
 }
@@ -784,17 +603,20 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     marginBottom: 8,
   },
-  ingredientInput: {
-    fontSize: 15,
-    color: "#444",
-    lineHeight: 23,
-    borderWidth: 1,
-    borderColor: "#ddd",
+  ingredientChipsContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  ingredientChip: {
+    backgroundColor: "#e8eef7",
     borderRadius: 6,
-    padding: 10,
-    minHeight: 80,
-    backgroundColor: "white",
-    textAlignVertical: "top",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  ingredientChipText: {
+    fontSize: 12,
+    color: "#3a5a8c",
   },
 
   // ─── FLAGGED BANNER ────────────────────────────────────────────
@@ -835,19 +657,19 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 15,
   },
-  editButton: {
+  flagButton: {
     flex: 1,
-    backgroundColor: "#eef4ff",
+    backgroundColor: "#fff8e6",
     borderWidth: 1,
-    borderColor: "#4a90e2",
+    borderColor: "#f0ad4e",
     borderRadius: 10,
     paddingVertical: 15,
     alignItems: "center",
   },
-  editText: {
-    color: "#4a90e2",
+  flagText: {
+    color: "#856404",
     fontWeight: "700",
-    fontSize: 15,
+    fontSize: 13,
   },
   removeButton: {
     flex: 1,
@@ -862,125 +684,5 @@ const styles = StyleSheet.create({
     color: "#e74c3c",
     fontWeight: "700",
     fontSize: 15,
-  },
-
-  // ─── EDIT MODAL ────────────────────────────────────────────────
-  modalContainer: {
-    flex: 1,
-    backgroundColor: "#f4f4f8",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingTop: 60,
-    paddingBottom: 14,
-    backgroundColor: "white",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e8e8e8",
-  },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: "600",
-    color: "#333",
-  },
-  modalCancel: {
-    fontSize: 16,
-    color: "#888",
-  },
-  modalSave: {
-    fontSize: 16,
-    color: "#007AFF",
-    fontWeight: "600",
-  },
-  modalScroll: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  modalSectionTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#888",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  modalLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#555",
-    marginBottom: 4,
-    marginTop: 10,
-  },
-  modalInput: {
-    backgroundColor: "white",
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    padding: 11,
-    fontSize: 15,
-    color: "#333",
-  },
-  modalHint: {
-    fontSize: 12,
-    color: "#aaa",
-    marginBottom: 8,
-  },
-  modalAddButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#d0d0d0",
-    borderStyle: "dashed",
-    marginTop: 8,
-  },
-  modalAddButtonText: {
-    fontSize: 14,
-    color: "#888",
-    fontWeight: "500",
-  },
-  editIngredientRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "white",
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: "#eee",
-  },
-  editIngredientRowActive: {
-    borderColor: "#007AFF",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  dragHandle: {
-    paddingRight: 10,
-    paddingVertical: 4,
-  },
-  dragHandleIcon: {
-    fontSize: 18,
-    color: "#ccc",
-  },
-  editIngredientInput: {
-    flex: 1,
-    fontSize: 14,
-    color: "#333",
-    paddingVertical: 2,
-  },
-  editIngredientDelete: {
-    fontSize: 15,
-    color: "#bbb",
-    fontWeight: "600",
-    paddingLeft: 8,
   },
 });

@@ -24,10 +24,7 @@ import { supabase } from "../../lib/supabase";
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 
-const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY || "";
-// TODO: DEVELOPER REVIEW — if EXPO_PUBLIC_OPENAI_API_KEY is missing, all GPT calls will return
-// 401 errors. The user gets a generic "Could not analyse photo" message with no indication why.
-// Consider adding a startup check and a clearer error message in that case.
+const ANTHROPIC_API_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || "";
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
@@ -158,37 +155,34 @@ export default function HomeScreen() {
     }
   };
 
-  const parseProductDetailsWithGPT = async (base64Image: string): Promise<ProductDetails> => {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const analyseProductPhotoWithClaude = async (base64Image: string): Promise<ProductDetails> => {
+    const prompt = 'This is a photo of the front of a cosmetic product. Extract only what is clearly visible on the packaging and return a JSON object with exactly these fields: "brand" (the manufacturer or brand name), "name" (the product name, excluding brand), "product_type" (category such as shampoo, conditioner, shower gel, body wash, toothpaste, deodorant, sunscreen, serum, moisturiser, mascara, foundation, lip gloss, face wash — one to three words), "variant" (colour, shade, flavour, scent, or edition — empty string if none). Do not guess or infer anything that is not visible. If a field is unclear or not shown, return an empty string for that field. Return ONLY the JSON object, no explanation or other text. Example: {"brand": "L\'Oreal", "name": "Elvive", "product_type": "shampoo", "variant": "Coconut"}';
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o",
+        model: "claude-sonnet-4-6",
+        max_tokens: 300,
         messages: [{
           role: "user",
           content: [
-            {
-              type: "image_url",
-              image_url: { url: `data:image/jpeg;base64,${base64Image}`, detail: "high" },
-            },
-            {
-              type: "text",
-              text: 'This is a photo of the front of a cosmetic product. Extract the following details and return them as a JSON object with exactly these fields: "brand" (the manufacturer or brand name), "name" (the product name, excluding brand), "product_type" (e.g. shampoo, conditioner, serum, moisturiser, mascara, foundation, lip gloss — one or two words), "variant" (colour, shade, flavour, scent, or edition — empty string if none). Return ONLY the JSON object, no explanation or other text. Example: {"brand": "L\'Oreal", "name": "Elvive", "product_type": "shampoo", "variant": "Coconut"}',
-            },
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Image } },
+            { type: "text", text: prompt },
           ],
         }],
-        max_tokens: 300,
       }),
     });
 
-    if (!response.ok) throw new Error(`OpenAI API error: ${response.status}`);
+    if (!response.ok) throw new Error(`Anthropic API error: ${response.status}`);
 
     const json = await response.json();
-    const content: string = json.choices?.[0]?.message?.content?.trim() ?? "{}";
-    const cleaned = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const text: string = json.content?.[0]?.text?.trim() ?? "{}";
+    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
     const parsed = JSON.parse(cleaned);
     return {
       brand: parsed.brand ?? "",
@@ -198,74 +192,40 @@ export default function HomeScreen() {
     };
   };
 
-  const parseIngredientsWithGPT = async (base64Image1: string, base64Image2?: string): Promise<string[]> => {
-    const imageContent: object[] = [
-      { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image1}`, detail: "high" } },
+  const analyseIngredientsWithClaude = async (base64Image1: string, base64Image2?: string): Promise<string[]> => {
+    const singlePrompt = "This image shows the back of a cosmetic product with an ingredients list. Transcribe the ingredients list EXACTLY as written, character for character. Ingredients may be separated by commas, dots, middle dots (·), semicolons, or bullet points - treat all of these as separators between ingredients. Do not add, remove, invent, or substitute any ingredients. Do not use common 'typical' ingredient lists from memory - only transcribe what is visibly written in THIS image. If a word is genuinely illegible, write [unclear] for that word only. Be aware that some INCI ingredient names contain commas as part of the chemical name itself, not as separators - for example '1,2-Hexanediol', '1,3-Propanediol', '2,3-Butanediol'. These numeric prefixes with commas are part of a single ingredient name and must NOT be split into separate items. Use your knowledge of cosmetic chemistry to recognise these patterns and keep them as one ingredient. Return ONLY a comma-separated list of ingredients in the exact order they appear, with no other text or commentary.";
+    const multiPrompt = singlePrompt + " These two images may show ingredients lists that continue from one to the other - combine them into a single ordered list.";
+
+    const content: object[] = [
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Image1 } },
       ...(base64Image2
-        ? [{ type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image2}`, detail: "high" } }]
+        ? [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Image2 } }]
         : []),
-      {
-        type: "text",
-        text: base64Image2
-          ? 'These images show the ingredient list of a cosmetic product, possibly continuing across both images. Read all visible ingredients from both images and return them as a single combined ordered list. Return ONLY a JSON object with one field: "ingredients" (a JSON array of strings in the order they appear). Example: {"ingredients": ["Water", "Glycerin", "Sodium Lauryl Sulfate"]}. Do not include any explanation or other text — only the JSON object.'
-          : 'Extract all ingredients from this cosmetic product label exactly as they appear — do not convert to INCI or change the spelling. Do NOT guess any ingredient you cannot read clearly. If a word is unclear or uncertain, skip it entirely rather than guessing. Never invent ingredient names. Return ONLY a JSON object with one field: "ingredients" (a JSON array of strings in the order they appear on the label). Example: {"ingredients": ["Water", "Glycerin", "Sodium Lauryl Sulfate"]}. Do not include any explanation or other text — only the JSON object.',
-      },
+      { type: "text", text: base64Image2 ? multiPrompt : singlePrompt },
     ];
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{ role: "user", content: imageContent }],
-        max_tokens: 1000,
+        model: "claude-sonnet-4-6",
+        max_tokens: 1024,
+        messages: [{ role: "user", content }],
       }),
     });
 
-    if (!response.ok) throw new Error(`OpenAI API error: ${response.status}`);
+    if (!response.ok) throw new Error(`Anthropic API error: ${response.status}`);
 
     const json = await response.json();
-    const content: string = json.choices?.[0]?.message?.content?.trim() ?? "{}";
-    const cleaned = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    const parsed = JSON.parse(cleaned);
-    return Array.isArray(parsed.ingredients) ? parsed.ingredients : [];
-  };
-
-  // Text-only call using gpt-4o-mini — runs in the background after save completes
-  const convertToINCIWithGPT = async (
-    ingredients: string[]
-  ): Promise<Array<{ raw: string; inci: string }>> => {
-    const numbered = ingredients.map((ing, i) => `${i + 1}. ${ing}`).join("\n");
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [{
-          role: "user",
-          content: `Convert these cosmetic ingredient names to their official INCI (International Nomenclature of Cosmetic Ingredients) names. Return ONLY a JSON array of objects with 'raw' and 'inci' fields. If you cannot find an INCI name, use the raw name as the inci value. Do not include any explanation.\n\n${numbered}`,
-        }],
-        max_tokens: 2000,
-      }),
-    });
-
-    if (!response.ok) throw new Error(`OpenAI API error: ${response.status}`);
-
-    const json = await response.json();
-    const content: string = json.choices?.[0]?.message?.content?.trim() ?? "[]";
-    const cleaned = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    const parsed = JSON.parse(cleaned);
-    return Array.isArray(parsed)
-      ? parsed.map((item: any) => ({
-          raw: typeof item.raw === "string" ? item.raw : "",
-          inci: typeof item.inci === "string" ? item.inci : (item.raw ?? ""),
-        }))
-      : ingredients.map(ing => ({ raw: ing, inci: ing }));
+    const text: string = json.content?.[0]?.text?.trim() ?? "";
+    return text
+      .split(",")
+      .map((s: string) => s.trim())
+      .filter((s: string) => s.length > 0);
   };
 
   // ─── HANDLERS ──────────────────────────────────────────────────────────────
@@ -314,6 +274,9 @@ export default function HomeScreen() {
         ingredientPhotoBase64 ? uploadPhotoBase64(ingredientPhotoBase64, "ingredients-photo", `${baseFilename}_ingredients1.jpg`) : Promise.resolve(null),
         ingredientPhotoBase64_2 ? uploadPhotoBase64(ingredientPhotoBase64_2, "ingredients-photo", `${baseFilename}_ingredients2.jpg`) : Promise.resolve(null),
       ]);
+      setProductPhotoBase64("");
+      setIngredientPhotoBase64("");
+      setIngredientPhotoBase64_2("");
 
       // -- Run in Supabase: ALTER TABLE products ADD COLUMN ingredient_image_url text;
       // -- Run in Supabase: ALTER TABLE products ADD COLUMN ingredient_image_url_2 text;
@@ -351,7 +314,7 @@ export default function HomeScreen() {
         .eq("barcode", scannedBarcode);
       if (scanUpdateError) console.warn("[save] Failed to update scan record:", scanUpdateError.message);
 
-      // Insert raw ingredient text — INCI names will be patched in the background
+      // Insert ingredients — Claude returns INCI names directly, so ingredient_name = raw_text
       if (parsedIngredients.length > 0) {
         await supabase.from("product_ingredients").delete().eq("product_id", newProductId);
 
@@ -381,9 +344,6 @@ export default function HomeScreen() {
         }
       }
 
-      // Snapshot the list before handleScanAgain clears parsedIngredients state
-      const ingredientsSnapshot = [...parsedIngredients];
-
       handleScanAgain();
       fetchCounts(scannedBy);
       Alert.alert(
@@ -391,23 +351,6 @@ export default function HomeScreen() {
         "Thank you for building the database!",
         [{ text: "Scan Another", style: "default" }]
       );
-
-      // Background INCI conversion — fires after UI resets; raw text is already safe in DB
-      if (ingredientsSnapshot.length > 0) {
-        convertToINCIWithGPT(ingredientsSnapshot)
-          .then(async (inciResults) => {
-            for (let i = 0; i < inciResults.length; i++) {
-              await supabase
-                .from("product_ingredients")
-                .update({ ingredient_name: inciResults[i].inci })
-                .eq("product_id", newProductId)
-                .eq("position", i + 1);
-            }
-          })
-          .catch(err => {
-            console.warn("[inci] Background INCI conversion failed:", err);
-          });
-      }
     } catch (e) {
       // Network-level failure or unexpected error — inform the user and allow a retry
       Alert.alert("Connection error", "Could not save the product. Please check your internet connection and try again.");
@@ -577,7 +520,7 @@ export default function HomeScreen() {
       setParsing(true);
       try {
         const compressed = await compressForGPT(productPhoto);
-        const details = await parseProductDetailsWithGPT(compressed);
+        const details = await analyseProductPhotoWithClaude(compressed);
         setBrand(details.brand);
         setProductName(details.name);
         setProductType(details.product_type);
@@ -719,7 +662,7 @@ export default function HomeScreen() {
           compressForGPT(ingredientPhoto),
           ingredientPhoto2 ? compressForGPT(ingredientPhoto2) : Promise.resolve(undefined as string | undefined),
         ]);
-        const ingredients = await parseIngredientsWithGPT(compressed1, compressed2);
+        const ingredients = await analyseIngredientsWithClaude(compressed1, compressed2);
         setParsedIngredients(ingredients);
         setScreen("reviewIngredients");
       } catch {
