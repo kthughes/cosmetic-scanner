@@ -1,0 +1,134 @@
+[
+  {
+    "inci_name": "Perfluorononanoic Acid",
+    "alternative_names": "Nonadecafluorodecanoic acid, PFNA, Ammonium perfluorononanoate, Sodium perfluorononanoate",
+    "cas_number": "375-95-1",
+    "function": "Surfactant",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1636",
+    "risk_score": 100,
+    "classification": "PFAS, Persistent organic pollutant, Reprotoxin",
+    "app_text": "Perfluorononanoic acid (PFNA) is a PFAS (forever chemical) banned in cosmetic products in the EU under Annex II/1636. PFAS chemicals are persistent in the body and environment, and have been associated with reproductive and developmental toxicity."
+  },
+  {
+    "inci_name": "Perfluoroheptanoic Acid",
+    "alternative_names": "Tridecafluoroheptanoic acid, PFHpA",
+    "cas_number": "375-85-9",
+    "function": "Surfactant",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1705",
+    "risk_score": 100,
+    "classification": "PFAS, Persistent organic pollutant",
+    "app_text": "A PFAS (forever chemical) banned in cosmetic products in the EU under Annex II/1705. PFAS chemicals are persistent in the body and environment with concerns around reproductive and hormonal effects."
+  },
+  {
+    "inci_name": "Bisphenol S",
+    "alternative_names": "4,4'-sulphonyldiphenol, BPS",
+    "cas_number": "80-09-1",
+    "function": "Plasticiser",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1702",
+    "risk_score": 100,
+    "classification": "Endocrine Disruptor",
+    "app_text": "Bisphenol S (BPS) is banned in cosmetic products in the EU under Annex II/1702. Like Bisphenol A (BPA), BPS is an endocrine disruptor with concerns around hormonal effects and reproductive health."
+  },
+  {
+    "inci_name": "Tetrabromobisphenol A",
+    "alternative_names": "2,2',6,6'-tetrabromo-4,4'-isopropylidenediphenol, TBBPA",
+    "cas_number": "79-94-7",
+    "function": "Flame retardant",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1732",
+    "risk_score": 100,
+    "classification": "Endocrine Disruptor, Reprotoxin",
+    "app_text": "Tetrabromobisphenol A (TBBPA) is banned in cosmetic products in the EU under Annex II/1732. It is an endocrine disruptor and suspected reprotoxin found as a contaminant in some cosmetic products."
+  },
+  {
+    "inci_name": "Methylhydrazine",
+    "alternative_names": "Monomethylhydrazine, MMH",
+    "cas_number": "60-34-4",
+    "function": "None (industrial chemical)",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1608",
+    "risk_score": 100,
+    "classification": "Carcinogen, Mutagen, Reprotoxin",
+    "app_text": "Methylhydrazine is banned in cosmetic products in the EU under Annex II/1608. It is classified as a carcinogen, mutagen and reprotoxin."
+  },
+  {
+    "inci_name": "Methylmercury Chloride",
+    "alternative_names": "Methylmercuric chloride, MeHgCl",
+    "cas_number": "115-09-3",
+    "function": "None (toxic contaminant)",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1647",
+    "risk_score": 100,
+    "classification": "Neurotoxin, Reprotoxin, Heavy metal",
+    "app_text": "Methylmercury chloride is banned in cosmetic products in the EU under Annex II/1647. Mercury compounds are highly toxic neurotoxins and reprotoxins that can cross the placental barrier and cause serious harm to fetal development."
+  },
+  {
+    "inci_name": "Tert-Butyl Hydroperoxide",
+    "alternative_names": "TBHP, tert-butyl hydroperoxide",
+    "cas_number": "75-91-2",
+    "function": "Oxidising agent",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1641",
+    "risk_score": 100,
+    "classification": "Oxidiser, Skin sensitiser",
+    "app_text": "Tert-Butyl Hydroperoxide is banned in cosmetic products in the EU under Annex II/1641."
+  },
+  {
+    "inci_name": "1,2-Dichloropropane",
+    "alternative_names": "Propylene dichloride, dichloropropane",
+    "cas_number": "78-87-5",
+    "function": "Solvent",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1625",
+    "risk_score": 100,
+    "classification": "Carcinogen",
+    "app_text": "1,2-Dichloropropane is banned in cosmetic products in the EU under Annex II/1625. It is classified as a carcinogen."
+  },
+  {
+    "inci_name": "Dibutyltin Dilaurate",
+    "alternative_names": "DBTL, dibutyl[bis(dodecanoyloxy)]stannane",
+    "cas_number": "77-58-7",
+    "function": "Stabiliser",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1601",
+    "risk_score": 100,
+    "classification": "Reprotoxin, Organotin compound",
+    "app_text": "Dibutyltin dilaurate is banned in cosmetic products in the EU under Annex II/1601. Organotin compounds are reprotoxins with concerns around hormonal disruption and developmental toxicity."
+  },
+  {
+    "inci_name": "Tetrafluoroethylene",
+    "alternative_names": "TFE, perfluoroethylene",
+    "cas_number": "116-14-3",
+    "function": "Monomer",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1681",
+    "risk_score": 100,
+    "classification": "Carcinogen, PFAS-related",
+    "app_text": "Tetrafluoroethylene is banned in cosmetic products in the EU under Annex II/1681."
+  },
+  {
+    "inci_name": "Bisphenol Af",
+    "alternative_names": "4,4'-[2,2,2-trifluoro-1-(trifluoromethyl)ethylidene]diphenol, BPAF",
+    "cas_number": "1478-61-1",
+    "function": "Plasticiser",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1743",
+    "risk_score": 100,
+    "classification": "Endocrine Disruptor, Reprotoxin",
+    "app_text": "Bisphenol AF (BPAF) is banned in cosmetic products in the EU under Annex II/1743. Like BPA and BPS, it is an endocrine disruptor with concerns around reproductive health."
+  },
+  {
+    "inci_name": "N,N'-Methylenediacrylamide",
+    "alternative_names": "Methylene bisacrylamide, MBA",
+    "cas_number": "110-26-9",
+    "function": "Monomer",
+    "banned": "EU Cosmetics Regulation 1223/2009 Annex II",
+    "annex_ii_ref": "II/1762",
+    "risk_score": 100,
+    "classification": "Neurotoxin, Reprotoxin",
+    "app_text": "N,N'-Methylenediacrylamide is banned in cosmetic products in the EU under Annex II/1762. It is a neurotoxin and reprotoxin."
+  }
+]
