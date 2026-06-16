@@ -114,6 +114,19 @@ export default function HomeScreen() {
 
   // ─── HELPERS ───────────────────────────────────────────────────────────────
 
+  const normalizeIngredient = (name: string): string => {
+    if (name === "[unclear]") return "[unclear]";
+    return name
+      // Title case each run of letters: first letter upper, rest lower
+      .replace(/[a-zA-Z]+/g, (word) =>
+        word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+      )
+      // Restore CI colorant codes (e.g. "Ci 17200" → "CI 17200")
+      .replace(/\bCi(?=\s+\d)/g, "CI")
+      // Restore [unclear] to lowercase in case it appeared mid-ingredient
+      .replace(/\[Unclear\]/g, "[unclear]");
+  };
+
   const compressForGPT = async (uri: string): Promise<string> => {
     const imageRef = await ImageManipulator.manipulate(uri)
       .resize({ width: 1024 })
@@ -225,7 +238,8 @@ export default function HomeScreen() {
     return text
       .split(",")
       .map((s: string) => s.trim())
-      .filter((s: string) => s.length > 0);
+      .filter((s: string) => s.length > 0)
+      .map(normalizeIngredient);
   };
 
   // ─── HANDLERS ──────────────────────────────────────────────────────────────
@@ -296,6 +310,7 @@ export default function HomeScreen() {
           product_image_url: productPhotoUrl,
           ingredient_image_url: ingredientPhotoUrl,
           ingredient_image_url_2: ingredientPhotoUrl2,
+          ingredients_text: parsedIngredients.join(", "),
         }])
         .select()
         .single();
