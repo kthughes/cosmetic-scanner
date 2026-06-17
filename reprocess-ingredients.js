@@ -32,8 +32,6 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !ANTHROPIC_API_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const CUTOFF_DATE = "2026-06-15";
-
 // ─── PROMPTS (mirror of analyseIngredientsWithClaude in app/(tabs)/index.tsx) ─
 
 const SINGLE_PROMPT =
@@ -111,9 +109,7 @@ function sleep(ms) {
 async function main() {
   const { data: products, error: fetchError } = await supabase
     .from("products")
-    .select("id, brand, name, variant, barcode, product_type, ingredient_image_url, ingredient_image_url_2")
-    .lt("created_at", CUTOFF_DATE)
-    .neq("qc_status", "approved")
+    .select("id, brand, name, variant, barcode, product_type, qc_status, ingredient_image_url, ingredient_image_url_2")
     .order("created_at", { ascending: false });
 
   if (fetchError) {
@@ -127,10 +123,17 @@ async function main() {
   let processed = 0;
   let flaggedCount = 0;
   let errorCount = 0;
+  let skippedCount = 0;
 
   for (let i = 0; i < products.length; i++) {
     const product = products[i];
-    console.log(`Processing ${i + 1}/${total}: ${product.brand} ${product.name}...`);
+
+    if (product.qc_status === "approved") {
+      skippedCount++;
+      continue;
+    }
+
+    console.log(`Processing ${i + 1}/${total}: ${product.brand} ${product.name} - writing to ingredients_ocr_raw`);
 
     try {
       if (!product.ingredient_image_url) {
@@ -150,23 +153,30 @@ async function main() {
 
       const { error: updateError } = await supabase
         .from("products")
-        .update({ ingredients_text: ingredientsText, qc_status: newStatus })
+        .update({
+          ingredients_ocr_raw: ingredientsText,
+          ingredients_ocr_raw_created_at: new Date().toISOString(),
+          qc_status: newStatus,
+        })
         .eq("id", product.id);
 
       if (updateError) throw new Error(`Product update failed: ${updateError.message}`);
 
-      await supabase.from("product_ingredients").delete().eq("product_id", product.id);
+      const { error: deleteError } = await supabase.from("product_ingredients").delete().eq("product_id", product.id);
+      if (deleteError) throw new Error(`Ingredients delete failed: ${deleteError.message}`);
 
       if (ingredients.length > 0) {
+        const now = new Date().toISOString();
         const rows = ingredients.map((name, index) => ({
           product_id: product.id,
-          barcode: product.barcode,
           ingredient_name: name,
           raw_text: name,
           position: index + 1,
           brand: product.brand,
           product_name: product.name,
           variant: product.variant ?? null,
+          barcode: product.barcode,
+          created_at: now,
         }));
 
         const { error: insertError } = await supabase.from("product_ingredients").insert(rows);
@@ -187,9 +197,10 @@ async function main() {
   }
 
   console.log("\n── Summary ──────────────────────────");
-  console.log(`Total processed:    ${processed}/${total}`);
+  console.log(`Total processed:    ${processed}`);
   console.log(`Flagged for laptop: ${flaggedCount}`);
   console.log(`Errors:             ${errorCount}`);
+  console.log(`Skipped (approved): ${skippedCount}`);
 }
 
 main();
