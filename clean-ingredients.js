@@ -72,6 +72,20 @@ const BOTANICAL_COMMON_NAMES = new Map([
   ["oenothera biennis (evening primrose) extract", "Oenothera Biennis Extract"],
   ["triticum vulgare (wheat) starch", "Triticum Vulgare Starch"],
   ["triticum vulgare (wheat) germ oil", "Triticum Vulgare Germ Oil"],
+  ["panthenol (vitamin b5)", "Panthenol"],
+  ["tocopherol (vitamin e)", "Tocopherol"],
+  ["olea europaea (olive) fruit oil", "Olea Europaea Fruit Oil"],
+  ["brassica campestris (rapeseed) seed oil", "Brassica Campestris Seed Oil"],
+  ["hamamelis virginiana (witch hazel) leaf extract", "Hamamelis Virginiana Leaf Extract"],
+  ["salix alba (willow) bark extract", "Salix Alba Bark Extract"],
+  ["citrus aurantium bergamia (bergamot) peel oil", "Citrus Aurantium Bergamia Peel Oil"],
+  ["citrus limon (lemon) peel oil", "Citrus Limon Peel Oil"],
+  ["cedrus deodara (cedar) wood oil", "Cedrus Deodara Wood Oil"],
+  ["citrus paradisi (grapefruit) peel oil", "Citrus Paradisi Peel Oil"],
+  ["pyrus malus (apple) fruit extract", "Pyrus Malus Fruit Extract"],
+  ["citrus nobilis (mandarin orange) oil", "Citrus Nobilis Oil"],
+  ["sea salt (maris sal)", "Maris Sal"],
+  ["maris sal (sea salt)", "Maris Sal"],
 ]);
 
 const AQUA_VARIANTS = new Set([
@@ -150,13 +164,17 @@ function cleanIngredient(raw) {
 }
 
 function cleanIngredientsList(ocrRaw) {
-  const safed = ocrRaw.replace(/1,2-hexanediol/gi, "HEXANEDIOL_PLACEHOLDER");
+  const safed = ocrRaw
+    .replace(/1,2-hexanediol/gi, "HEXANEDIOL_PLACEHOLDER")
+    .replace(/hydroxypropyl guar,\s*hydroxypropyltrimonium chloride/gi, "HYDROXYPROPYL_GUAR_PLACEHOLDER");
   const cleaned = safed
     .split(",")
     .map(cleanIngredient)
     .filter((s) => s.length > 0)
     .join(", ");
-  return cleaned.replace(/HEXANEDIOL_PLACEHOLDER/g, "1,2-Hexanediol");
+  return cleaned
+    .replace(/HEXANEDIOL_PLACEHOLDER/g, "1,2-Hexanediol")
+    .replace(/HYDROXYPROPYL_GUAR_PLACEHOLDER/g, "Hydroxypropyl Guar Hydroxypropyltrimonium Chloride");
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
