@@ -86,6 +86,46 @@ const BOTANICAL_COMMON_NAMES = new Map([
   ["citrus nobilis (mandarin orange) oil", "Citrus Nobilis Oil"],
   ["sea salt (maris sal)", "Maris Sal"],
   ["maris sal (sea salt)", "Maris Sal"],
+  ["glycine soja oil/soybean oil", "Glycine Soja Oil"],
+  ["helianthus annuus seed oil/sunflower seed oil", "Helianthus Annuus Seed Oil"],
+  ["cocos nucifera oil/coconut oil", "Cocos Nucifera Oil"],
+  ["citrullus lanatus fruit extract/watermelon fruit extract", "Citrullus Lanatus Fruit Extract"],
+  ["ricinus communis seed oil/castor seed oil", "Ricinus Communis Seed Oil"],
+  ["theobroma cacao seed butter/cocoa seed butter", "Theobroma Cacao Seed Butter"],
+  ["simmondsia chinensis seed oil/jojoba seed oil", "Simmondsia Chinensis Seed Oil"],
+  ["musa paradisiaca fruit juice/banana fruit juice", "Musa Paradisiaca Fruit Juice"],
+  ["carica papaya fruit extract/papaya fruit extract", "Carica Papaya Fruit Extract"],
+  ["ananas sativus fruit extract/pineapple fruit extract", "Ananas Sativus Fruit Extract"],
+  ["vitis vinifera seed oil/grape seed oil", "Vitis Vinifera Seed Oil"],
+  ["vitis vinifera fruit water/grape fruit water", "Vitis Vinifera Fruit Water"],
+  ["persea gratissima oil/avocado oil", "Persea Gratissima Oil"],
+  ["rosmarinus officinalis leaf extract/rosemary leaf extract", "Rosmarinus Officinalis Leaf Extract"],
+  ["copernicia cerifera cera/carnauba wax", "Copernicia Cerifera"],
+  ["acacia decurrens flower cera/acacia decurrens flower wax", "Acacia Decurrens Flower Cera"],
+  ["helianthus annuus seed cera/sunflower seed wax", "Helianthus Annuus Seed Cera"],
+  ["mel/honey", "Mel"],
+  ["cera alba/beeswax", "Cera Alba"],
+  ["aqua/water/eau", "Aqua"],
+  ["aqua/water", "Aqua"],
+  ["disodium edta", "Disodium EDTA"],
+  ["tetrasodium edta", "Tetrasodium EDTA"],
+  ["tea-dodecylbenzenesulfonate", "TEA-Dodecylbenzenesulfonate"],
+  ["cocamide mea", "Cocamide MEA"],
+  ["cocamide dea", "Cocamide DEA"],
+  ["peg-400", "PEG-400"],
+  ["ppg-3 benzyl ether myristate", "PPG-3 Benzyl Ether Myristate"],
+  ["ppg-1 trideceth-6", "PPG-1 Trideceth-6"],
+  ["ppg-2 hydroxyethyl cocamide", "PPG-2 Hydroxyethyl Cocamide"],
+  ["ppg-7 amodimethicone", "PPG-7 Amodimethicone"],
+  ["ppg-5-ceteth-20", "PPG-5-Ceteth-20"],
+  ["peg-7 amodimethicone", "PEG-7 Amodimethicone"],
+  ["peg-150 pentaerythrityl tetrastearate", "PEG-150 Pentaerythrityl Tetrastearate"],
+  ["peg-100 stearate", "PEG-100 Stearate"],
+  ["peg-55 propylene glycol oleate", "PEG-55 Propylene Glycol Oleate"],
+  ["peg-60 hydrogenated castor oil", "PEG-60 Hydrogenated Castor Oil"],
+  ["peg-40 hydrogenated castor oil", "PEG-40 Hydrogenated Castor Oil"],
+  ["peg-14m", "PEG-14M"],
+  ["peg-120 methyl glucose dioleate", "PEG-120 Methyl Glucose Dioleate"],
 ]);
 
 const AQUA_VARIANTS = new Set([
@@ -110,6 +150,12 @@ function cleanIngredient(raw) {
 
   // Rule 1B — Remove trailing footnote markers (*, **, †, +, ‡ and combinations)
   s = s.replace(/[*†+‡]+$/, "").trim();
+
+  // Rule 1C — Bilingual slash splitting: keep only the left side of " / "
+  if (/ \/ /.test(s) && !/^(parfum|fragrance)\b/i.test(s)) {
+    const left = s.split(" / ")[0].trim();
+    if (left.length >= 2) s = left;
+  }
 
   // Rule 9 — Botanical common name removal
   const botanicalMatch = BOTANICAL_COMMON_NAMES.get(s.toLowerCase());
