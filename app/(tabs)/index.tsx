@@ -479,12 +479,23 @@ export default function HomeScreen() {
         .map(sanitize);
       const baseFilename = `${nameParts.join("_")}_${Date.now()}`;
 
+      if (!ingredientPhotoBase64) {
+        Alert.alert("No ingredient photo", "Please take a photo of the ingredients before saving.");
+        return;
+      }
+
       // Upload all photos in parallel — falls back to null if any fail
       const [productPhotoUrl, ingredientPhotoUrl, ingredientPhotoUrl2] = await Promise.all([
         productPhotoBase64 ? uploadPhotoBase64(productPhotoBase64, "product-photo", `${baseFilename}.jpg`) : Promise.resolve(null),
-        ingredientPhotoBase64 ? uploadPhotoBase64(ingredientPhotoBase64, "ingredients-photo", `${baseFilename}_ingredients1.jpg`) : Promise.resolve(null),
+        uploadPhotoBase64(ingredientPhotoBase64, "ingredients-photo", `${baseFilename}_ingredients1.jpg`),
         ingredientPhotoBase64_2 ? uploadPhotoBase64(ingredientPhotoBase64_2, "ingredients-photo", `${baseFilename}_ingredients2.jpg`) : Promise.resolve(null),
       ]);
+
+      if (!ingredientPhotoUrl) {
+        Alert.alert("Photo upload failed", "Please check your connection and try again.");
+        return;
+      }
+
       setProductPhotoBase64("");
       setIngredientPhotoBase64("");
       setIngredientPhotoBase64_2("");
@@ -496,6 +507,12 @@ export default function HomeScreen() {
       const rawText = parsedIngredients.join(", ");
       const cleanedText = cleanIngredients(rawText);
       const computedQcStatus = rawText.includes("[unclear]") ? "flagged_for_laptop" : "pending";
+
+      const pt = productType.toLowerCase();
+      const rinseOff: boolean | null =
+        /shampoo|conditioner|body wash|shower gel|face wash|cleanser|bath|scrub|exfoliat|shaving|hand wash|shave/.test(pt) ? true :
+        /moistur|serum|lotion|cream|balm|oil|deodorant|antiperspirant|sunscreen|spf|foundation|primer|mascara|styling|hairspray|mousse|spray|toner|ointment|leave-in|leave in/.test(pt) ? false :
+        null;
 
       // Insert the product record
       const { data: newProduct, error: productError } = await supabase
@@ -517,6 +534,8 @@ export default function HomeScreen() {
           ingredients_cleaned_at: new Date().toISOString(),
           ingredients_verified: cleanedText,
           ingredients_verified_at: new Date().toISOString(),
+          rinse_off: rinseOff,
+          ingredients_verified_by: "Katie Hughes",
         }])
         .select()
         .single();

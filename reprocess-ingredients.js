@@ -110,6 +110,8 @@ async function main() {
   const { data: products, error: fetchError } = await supabase
     .from("products")
     .select("id, brand, name, variant, barcode, product_type, qc_status, ingredient_image_url, ingredient_image_url_2")
+    .is("ingredients_ocr_raw", null)
+    .neq("qc_status", "approved")
     .order("created_at", { ascending: false });
 
   if (fetchError) {
