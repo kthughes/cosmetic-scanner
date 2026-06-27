@@ -33,100 +33,19 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ─── CLEANING RULES ───────────────────────────────────────────────────────────
 
-// Rule 9 — Botanical common name removal (case-insensitive match, canonical output)
-const BOTANICAL_COMMON_NAMES = new Map([
-  ["ricinus communis (castor) seed oil", "Ricinus Communis Seed Oil"],
-  ["helianthus annuus (sunflower) seed oil", "Helianthus Annuus Seed Oil"],
-  ["mentha piperita (peppermint) oil", "Mentha Piperita Oil"],
-  ["theobroma cacao (cocoa) seed butter", "Theobroma Cacao Seed Butter"],
-  ["copernicia cerifera (carnauba) wax", "Copernicia Cerifera Wax"],
-  ["butyrospermum parkii (shea) butter", "Butyrospermum Parkii Butter"],
-  ["fragaria ananassa (strawberry) seed oil", "Fragaria Ananassa Seed Oil"],
-  ["fragaria ananassa (strawberry) fruit extract", "Fragaria Ananassa Fruit Extract"],
-  ["prunus armeniaca (apricot) kernel oil", "Prunus Armeniaca Kernel Oil"],
-  ["ribes nigrum (black currant) seed oil", "Ribes Nigrum Seed Oil"],
-  ["rosmarinus officinalis (rosemary) leaf extract", "Rosmarinus Officinalis Leaf Extract"],
-  ["rosmarinus officinalis (rosemary) leaf oil", "Rosmarinus Officinalis Leaf Oil"],
-  ["glycine soja (soybean) oil", "Glycine Soja Oil"],
-  ["sambucus nigra (elder) flower extract", "Sambucus Nigra Flower Extract"],
-  ["cucumis sativus (cucumber) fruit extract", "Cucumis Sativus Fruit Extract"],
-  ["cucumis sativus (cucumber) fruit water", "Cucumis Sativus Fruit Water"],
-  ["cocos nucifera (coconut) oil", "Cocos Nucifera Oil"],
-  ["cocos nucifera (coconut) fruit extract", "Cocos Nucifera Fruit Extract"],
-  ["persea gratissima (avocado) oil", "Persea Gratissima Oil"],
-  ["prunus amygdalus dulcis (sweet almond) oil", "Prunus Amygdalus Dulcis Oil"],
-  ["prunus amygdalus dulcis (sweet almond) seed extract", "Prunus Amygdalus Dulcis Seed Extract"],
-  ["lavandula angustifolia (lavender) oil", "Lavandula Angustifolia Oil"],
-  ["chamomilla recutita (matricaria) flower extract", "Chamomilla Recutita Flower Extract"],
-  ["chamomilla recutita (matricaria) flower/leaf extract", "Chamomilla Recutita Flower/Leaf Extract"],
-  ["rosa damascena (damask rose) flower water", "Rosa Damascena Flower Water"],
-  ["rubus villosus (blackberry) fruit extract", "Rubus Villosus Fruit Extract"],
-  ["urtica dioica (nettle) leaf extract", "Urtica Dioica Leaf Extract"],
-  ["illicium verum (anise) fruit/seed oil", "Illicium Verum Fruit/Seed Oil"],
-  ["pelargonium graveolens (geranium) oil", "Pelargonium Graveolens Oil"],
-  ["avena sativa (oat) kernel extract", "Avena Sativa Kernel Extract"],
-  ["juglans regia (walnut) shell powder", "Juglans Regia Shell Powder"],
-  ["carica papaya (papaya) fruit extract", "Carica Papaya Fruit Extract"],
-  ["linum usitatissimum (linseed) seed extract", "Linum Usitatissimum Seed Extract"],
-  ["mangifera indica (mango) seed butter", "Mangifera Indica Seed Butter"],
-  ["oenothera biennis (evening primrose) extract", "Oenothera Biennis Extract"],
-  ["triticum vulgare (wheat) starch", "Triticum Vulgare Starch"],
-  ["triticum vulgare (wheat) germ oil", "Triticum Vulgare Germ Oil"],
-  ["panthenol (vitamin b5)", "Panthenol"],
-  ["tocopherol (vitamin e)", "Tocopherol"],
-  ["olea europaea (olive) fruit oil", "Olea Europaea Fruit Oil"],
-  ["brassica campestris (rapeseed) seed oil", "Brassica Campestris Seed Oil"],
-  ["hamamelis virginiana (witch hazel) leaf extract", "Hamamelis Virginiana Leaf Extract"],
-  ["salix alba (willow) bark extract", "Salix Alba Bark Extract"],
-  ["citrus aurantium bergamia (bergamot) peel oil", "Citrus Aurantium Bergamia Peel Oil"],
-  ["citrus limon (lemon) peel oil", "Citrus Limon Peel Oil"],
-  ["cedrus deodara (cedar) wood oil", "Cedrus Deodara Wood Oil"],
-  ["citrus paradisi (grapefruit) peel oil", "Citrus Paradisi Peel Oil"],
-  ["pyrus malus (apple) fruit extract", "Pyrus Malus Fruit Extract"],
-  ["citrus nobilis (mandarin orange) oil", "Citrus Nobilis Oil"],
-  ["sea salt (maris sal)", "Maris Sal"],
-  ["maris sal (sea salt)", "Maris Sal"],
-  ["glycine soja oil/soybean oil", "Glycine Soja Oil"],
-  ["helianthus annuus seed oil/sunflower seed oil", "Helianthus Annuus Seed Oil"],
-  ["cocos nucifera oil/coconut oil", "Cocos Nucifera Oil"],
-  ["citrullus lanatus fruit extract/watermelon fruit extract", "Citrullus Lanatus Fruit Extract"],
-  ["ricinus communis seed oil/castor seed oil", "Ricinus Communis Seed Oil"],
-  ["theobroma cacao seed butter/cocoa seed butter", "Theobroma Cacao Seed Butter"],
-  ["simmondsia chinensis seed oil/jojoba seed oil", "Simmondsia Chinensis Seed Oil"],
-  ["musa paradisiaca fruit juice/banana fruit juice", "Musa Paradisiaca Fruit Juice"],
-  ["carica papaya fruit extract/papaya fruit extract", "Carica Papaya Fruit Extract"],
-  ["ananas sativus fruit extract/pineapple fruit extract", "Ananas Sativus Fruit Extract"],
-  ["vitis vinifera seed oil/grape seed oil", "Vitis Vinifera Seed Oil"],
-  ["vitis vinifera fruit water/grape fruit water", "Vitis Vinifera Fruit Water"],
-  ["persea gratissima oil/avocado oil", "Persea Gratissima Oil"],
-  ["rosmarinus officinalis leaf extract/rosemary leaf extract", "Rosmarinus Officinalis Leaf Extract"],
-  ["copernicia cerifera cera/carnauba wax", "Copernicia Cerifera"],
-  ["acacia decurrens flower cera/acacia decurrens flower wax", "Acacia Decurrens Flower Cera"],
-  ["helianthus annuus seed cera/sunflower seed wax", "Helianthus Annuus Seed Cera"],
-  ["mel/honey", "Mel"],
-  ["cera alba/beeswax", "Cera Alba"],
-  ["aqua/water/eau", "Aqua"],
-  ["aqua/water", "Aqua"],
-  ["disodium edta", "Disodium EDTA"],
-  ["tetrasodium edta", "Tetrasodium EDTA"],
-  ["tea-dodecylbenzenesulfonate", "TEA-Dodecylbenzenesulfonate"],
-  ["cocamide mea", "Cocamide MEA"],
-  ["cocamide dea", "Cocamide DEA"],
-  ["peg-400", "PEG-400"],
-  ["ppg-3 benzyl ether myristate", "PPG-3 Benzyl Ether Myristate"],
-  ["ppg-1 trideceth-6", "PPG-1 Trideceth-6"],
-  ["ppg-2 hydroxyethyl cocamide", "PPG-2 Hydroxyethyl Cocamide"],
-  ["ppg-7 amodimethicone", "PPG-7 Amodimethicone"],
-  ["ppg-5-ceteth-20", "PPG-5-Ceteth-20"],
-  ["peg-7 amodimethicone", "PEG-7 Amodimethicone"],
-  ["peg-150 pentaerythrityl tetrastearate", "PEG-150 Pentaerythrityl Tetrastearate"],
-  ["peg-100 stearate", "PEG-100 Stearate"],
-  ["peg-55 propylene glycol oleate", "PEG-55 Propylene Glycol Oleate"],
-  ["peg-60 hydrogenated castor oil", "PEG-60 Hydrogenated Castor Oil"],
-  ["peg-40 hydrogenated castor oil", "PEG-40 Hydrogenated Castor Oil"],
-  ["peg-14m", "PEG-14M"],
-  ["peg-120 methyl glucose dioleate", "PEG-120 Methyl Glucose Dioleate"],
-]);
+async function loadCleanupRules() {
+  try {
+    const { data, error } = await supabase
+      .from('cleanup_rules')
+      .select('raw_name, cleaned_name');
+    if (error || !data) return new Map();
+    console.log(`Loaded ${data.length} cleanup rules from database`);
+    return new Map(data.map(r => [r.raw_name.toLowerCase(), r.cleaned_name]));
+  } catch (e) {
+    console.log('Could not load cleanup rules:', e.message);
+    return new Map();
+  }
+}
 
 const AQUA_VARIANTS = new Set([
   "aqua (water)",
@@ -144,7 +63,7 @@ function wordTokens(str) {
   return str.toLowerCase().match(/[a-z]+/g) ?? [];
 }
 
-function cleanIngredient(raw) {
+function cleanIngredient(raw, cleanupRules = new Map()) {
   // Rule 1 — Trim
   let s = raw.trim();
 
@@ -157,9 +76,9 @@ function cleanIngredient(raw) {
     if (left.length >= 2) s = left;
   }
 
-  // Rule 9 — Botanical common name removal
-  const botanicalMatch = BOTANICAL_COMMON_NAMES.get(s.toLowerCase());
-  if (botanicalMatch) return botanicalMatch;
+  // Rule 9 — Cleanup rules lookup
+  const ruleMatch = cleanupRules.get(s.toLowerCase());
+  if (ruleMatch) return ruleMatch;
 
   // Rule 2 — Aqua standardisation
   if (AQUA_VARIANTS.has(s.toLowerCase())) return "Aqua";
@@ -209,13 +128,13 @@ function cleanIngredient(raw) {
   return s.trim();
 }
 
-function cleanIngredientsList(ocrRaw) {
+function cleanIngredientsList(ocrRaw, cleanupRules = new Map()) {
   const safed = ocrRaw
     .replace(/1,2-hexanediol/gi, "HEXANEDIOL_PLACEHOLDER")
     .replace(/hydroxypropyl guar,\s*hydroxypropyltrimonium chloride/gi, "HYDROXYPROPYL_GUAR_PLACEHOLDER");
   const cleaned = safed
     .split(",")
-    .map(cleanIngredient)
+    .map(s => cleanIngredient(s, cleanupRules))
     .filter((s) => s.length > 0)
     .join(", ");
   return cleaned
@@ -237,6 +156,8 @@ async function main() {
     process.exit(1);
   }
 
+  const cleanupRules = await loadCleanupRules();
+
   const total = products.length;
   console.log(`Found ${total} product(s) to clean.\n`);
 
@@ -249,7 +170,7 @@ async function main() {
     console.log(`Cleaning ${i + 1}/${total}: ${product.brand} ${product.name}`);
 
     try {
-      const cleanedText = cleanIngredientsList(product.ingredients_ocr_raw);
+      const cleanedText = cleanIngredientsList(product.ingredients_ocr_raw, cleanupRules);
 
       const hasUnclear = /\[unclear\]/i.test(product.ingredients_ocr_raw);
       let newQcStatus;
