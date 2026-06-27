@@ -491,6 +491,11 @@ export default function HomeScreen() {
         ingredientPhotoBase64_2 ? uploadPhotoBase64(ingredientPhotoBase64_2, "ingredients-photo", `${baseFilename}_ingredients2.jpg`) : Promise.resolve(null),
       ]);
 
+      if (productPhotoBase64 && !productPhotoUrl) {
+        Alert.alert("Product photo upload failed", "Please check your connection and try again.");
+        return;
+      }
+
       if (!ingredientPhotoUrl) {
         Alert.alert("Photo upload failed", "Please check your connection and try again.");
         return;
@@ -535,7 +540,6 @@ export default function HomeScreen() {
           ingredients_verified: cleanedText,
           ingredients_verified_at: new Date().toISOString(),
           rinse_off: rinseOff,
-          ingredients_verified_by: "Katie Hughes",
         }])
         .select()
         .single();
