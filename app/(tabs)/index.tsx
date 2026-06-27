@@ -44,6 +44,203 @@ interface ProductDetails {
   variant: string;
 }
 
+// ─── INGREDIENT CLEANING ─────────────────────────────────────────────────────
+
+const BOTANICAL_MAP: Record<string, string> = {
+  "butyrospermum parkii (shea) butter": "Butyrospermum Parkii Butter",
+  "helianthus annuus (sunflower) seed oil": "Helianthus Annuus Seed Oil",
+  "cocos nucifera (coconut) oil": "Cocos Nucifera Oil",
+  "mentha piperita (peppermint) oil": "Mentha Piperita Oil",
+  "theobroma cacao (cocoa) seed butter": "Theobroma Cacao Seed Butter",
+  "copernicia cerifera (carnauba) wax": "Copernicia Cerifera Cera",
+  "fragaria ananassa (strawberry) seed oil": "Fragaria Ananassa Seed Oil",
+  "fragaria ananassa (strawberry) fruit extract": "Fragaria Ananassa Fruit Extract",
+  "prunus armeniaca (apricot) kernel oil": "Prunus Armeniaca Kernel Oil",
+  "ribes nigrum (black currant) seed oil": "Ribes Nigrum Seed Oil",
+  "rosmarinus officinalis (rosemary) leaf extract": "Rosmarinus Officinalis Leaf Extract",
+  "rosmarinus officinalis (rosemary) leaf oil": "Rosmarinus Officinalis Leaf Oil",
+  "glycine soja (soybean) oil": "Glycine Soja Oil",
+  "sambucus nigra (elder) flower extract": "Sambucus Nigra Flower Extract",
+  "cucumis sativus (cucumber) fruit extract": "Cucumis Sativus Fruit Extract",
+  "cucumis sativus (cucumber) fruit water": "Cucumis Sativus Fruit Water",
+  "persea gratissima (avocado) oil": "Persea Gratissima Oil",
+  "prunus amygdalus dulcis (sweet almond) oil": "Prunus Amygdalus Dulcis Oil",
+  "prunus amygdalus dulcis (sweet almond) seed extract": "Prunus Amygdalus Dulcis Seed Extract",
+  "lavandula angustifolia (lavender) oil": "Lavandula Angustifolia Oil",
+  "chamomilla recutita (matricaria) flower extract": "Chamomilla Recutita Flower Extract",
+  "chamomilla recutita (matricaria) flower/leaf extract": "Chamomilla Recutita Flower/Leaf Extract",
+  "rosa damascena (damask rose) flower water": "Rosa Damascena Flower Water",
+  "rubus villosus (blackberry) fruit extract": "Rubus Villosus Fruit Extract",
+  "urtica dioica (nettle) leaf extract": "Urtica Dioica Leaf Extract",
+  "illicium verum (anise) fruit/seed oil": "Illicium Verum Fruit/Seed Oil",
+  "pelargonium graveolens (geranium) oil": "Pelargonium Graveolens Oil",
+  "avena sativa (oat) kernel extract": "Avena Sativa Kernel Extract",
+  "avena sativa (oat) leaf/stem extract": "Avena Sativa Leaf/Stem Extract",
+  "juglans regia (walnut) shell powder": "Juglans Regia Shell Powder",
+  "linum usitatissimum (linseed) seed extract": "Linum Usitatissimum Seed Extract",
+  "mangifera indica (mango) seed butter": "Mangifera Indica Seed Butter",
+  "oenothera biennis (evening primrose) extract": "Oenothera Biennis Extract",
+  "triticum vulgare (wheat) starch": "Triticum Vulgare Starch",
+  "triticum vulgare (wheat) germ oil": "Triticum Vulgare Germ Oil",
+  "olea europaea (olive) fruit oil": "Olea Europaea Fruit Oil",
+  "brassica campestris (rapeseed) seed oil": "Brassica Campestris Seed Oil",
+  "hamamelis virginiana (witch hazel) leaf extract": "Hamamelis Virginiana Leaf Extract",
+  "salix alba (willow) bark extract": "Salix Alba Bark Extract",
+  "citrus aurantium bergamia (bergamot) peel oil": "Citrus Aurantium Bergamia Peel Oil",
+  "citrus limon (lemon) peel oil": "Citrus Limon Peel Oil",
+  "cedrus deodara (cedar) wood oil": "Cedrus Deodara Wood Oil",
+  "citrus paradisi (grapefruit) peel oil": "Citrus Paradisi Peel Oil",
+  "pyrus malus (apple) fruit extract": "Pyrus Malus Fruit Extract",
+  "citrus nobilis (mandarin orange) oil": "Citrus Nobilis Oil",
+  "simmondsia chinensis (jojoba) seed oil": "Simmondsia Chinensis Seed Oil",
+  "citrus aurantium amara (bitter orange) leaf/twig oil": "Citrus Aurantium Amara Leaf/Twig Oil",
+  "mentha viridis (spearmint) leaf oil": "Mentha Viridis Leaf Oil",
+  "castanea crenata (chestnut) shell extract": "Castanea Crenata Shell Extract",
+  "panthenol (vitamin b5)": "Panthenol",
+  "tocopherol (vitamin e)": "Tocopherol",
+  "glycine soja oil/soybean oil": "Glycine Soja Oil",
+  "helianthus annuus seed oil/sunflower seed oil": "Helianthus Annuus Seed Oil",
+  "cocos nucifera oil/coconut oil": "Cocos Nucifera Oil",
+  "citrullus lanatus fruit extract/watermelon fruit extract": "Citrullus Lanatus Fruit Extract",
+  "ricinus communis seed oil/castor seed oil": "Ricinus Communis Seed Oil",
+  "theobroma cacao seed butter/cocoa seed butter": "Theobroma Cacao Seed Butter",
+  "simmondsia chinensis seed oil/jojoba seed oil": "Simmondsia Chinensis Seed Oil",
+  "musa paradisiaca fruit juice/banana fruit juice": "Musa Paradisiaca Fruit Juice",
+  "carica papaya fruit extract/papaya fruit extract": "Carica Papaya Fruit Extract",
+  "ananas sativus fruit extract/pineapple fruit extract": "Ananas Sativus Fruit Extract",
+  "vitis vinifera seed oil/grape seed oil": "Vitis Vinifera Seed Oil",
+  "vitis vinifera fruit water/grape fruit water": "Vitis Vinifera Fruit Water",
+  "persea gratissima oil/avocado oil": "Persea Gratissima Oil",
+  "rosmarinus officinalis leaf extract/rosemary leaf extract": "Rosmarinus Officinalis Leaf Extract",
+  "copernicia cerifera cera/carnauba wax": "Copernicia Cerifera Cera",
+  "acacia decurrens flower cera/acacia decurrens flower wax": "Acacia Decurrens Flower Cera",
+  "helianthus annuus seed cera/sunflower seed wax": "Helianthus Annuus Seed Cera",
+  "mel/honey": "Mel",
+  "cera alba/beeswax": "Cera Alba",
+  "aqua/water/eau": "Aqua",
+  "aqua/water": "Aqua",
+  "sea salt (maris sal)": "Maris Sal",
+  "maris sal (sea salt)": "Maris Sal",
+  "purified water": "Aqua",
+  "soybean oil": "Glycine Soja Oil",
+  "sunflower seed oil": "Helianthus Annuus Seed Oil",
+  "liquid paraffin": "Paraffinum Liquidum",
+  "paraffin wax": "Paraffin",
+  "parffin": "Paraffin",
+  "lavender fragrance": "Parfum",
+  "stearellium-20": "Steareth-20",
+  "caryone": "Carvone",
+  "ci75810": "CI 75810",
+  "linalool acetate": "Linalyl Acetate",
+  "linelyl acetate": "Linalyl Acetate",
+  "linolyl acetate": "Linalyl Acetate",
+  "palmitoyl palmitoyl tripeptide-1": "Palmitoyl Tripeptide-1",
+  "tetramethyl acetyloctahydronaphthalene": "Tetramethyl Acetyloctahydronaphthalenes",
+  "tetramethyl acetyloctohydronaphthalenes": "Tetramethyl Acetyloctahydronaphthalenes",
+  "trihyoroxystearin": "Trihydroxystearin",
+  "distearoyethyl dimonium chloride": "Distearoylethyl Dimonium Chloride",
+  "guar hydroxypropyl trimonium chloride": "Guar Hydroxypropyltrimonium Chloride",
+  "cocamidea": "Cocamide",
+  "coco-glukoside": "Coco-Glucoside",
+  "pirocotone olamine": "Piroctone Olamine",
+  "alpha-isomethyl lonone": "Alpha-Isomethyl Ionone",
+  "ethylhexyl triazore": "Ethylhexyl Triazone",
+  "glycaryl stearate": "Glyceryl Stearate",
+  "alcohol denatured": "Alcohol Denat.",
+  "ext. violet 2 (ci 60730)": "CI 60730",
+  "disodium edta": "Disodium EDTA",
+  "tetrasodium edta": "Tetrasodium EDTA",
+  "tea-dodecylbenzenesulfonate": "TEA-Dodecylbenzenesulfonate",
+  "cocamide mea": "Cocamide MEA",
+  "cocamide dea": "Cocamide DEA",
+  "peg-400": "PEG-400",
+  "ppg-3 benzyl ether myristate": "PPG-3 Benzyl Ether Myristate",
+  "ppg-1 trideceth-6": "PPG-1 Trideceth-6",
+  "ppg-2 hydroxyethyl cocamide": "PPG-2 Hydroxyethyl Cocamide",
+  "ppg-7 amodimethicone": "PPG-7 Amodimethicone",
+  "ppg-5-ceteth-20": "PPG-5-Ceteth-20",
+  "peg-7 amodimethicone": "PEG-7 Amodimethicone",
+  "peg-150 pentaerythrityl tetrastearate": "PEG-150 Pentaerythrityl Tetrastearate",
+  "peg-100 stearate": "PEG-100 Stearate",
+  "peg-55 propylene glycol oleate": "PEG-55 Propylene Glycol Oleate",
+  "peg-60 hydrogenated castor oil": "PEG-60 Hydrogenated Castor Oil",
+  "peg-40 hydrogenated castor oil": "PEG-40 Hydrogenated Castor Oil",
+  "peg-14m": "PEG-14M",
+  "peg-120 methyl glucose dioleate": "PEG-120 Methyl Glucose Dioleate",
+};
+
+const AQUA_VARIANTS = new Set([
+  "aqua (water)", "aqua / water", "aqua/water/eau", "aqua/water",
+  "water (aqua)", "water(aqua)", "water / aqua", "water", "purified water",
+]);
+
+const cleanIngredients = (rawText: string): string => {
+  let text = rawText;
+  text = text.replace(/1,2-Hexanediol/gi, "HEXANEDIOL_PLACEHOLDER");
+  text = text.replace(/Hydroxypropyl Guar, Hydroxypropyltrimonium Chloride/gi, "HYDROXYPROPYL_GUAR_PLACEHOLDER");
+
+  const cleaned = text.split(",").map((raw) => {
+    let s = raw.trim(); // Rule 1
+
+    s = s.replace(/\s*[*†+‡]+$/, "").trim(); // Rule 1B
+
+    if (/ \/ /.test(s) && !/^(parfum|fragrance)/i.test(s)) { // Rule 1C
+      s = s.split(" / ")[0].trim();
+    }
+
+    const botanical = BOTANICAL_MAP[s.toLowerCase()]; // Rule 9
+    if (botanical !== undefined) s = botanical;
+
+    if (AQUA_VARIANTS.has(s.toLowerCase())) s = "Aqua"; // Rule 2
+
+    if (/^(parfum|fragrance)/i.test(s)) s = "Parfum"; // Rule 3
+
+    // Rule 4: F.I.L and EU batch codes
+    s = s
+      .replace(/\(F\.I\.L[^)]*\)/gi, "")
+      .replace(/\(F\.IL[^)]*\)/gi, "")
+      .replace(/\(F\.I\.I[^)]*\)/gi, "")
+      .replace(/\(FIL[^)]*\)/gi, "")
+      .replace(/\(EU[A-Za-z0-9][^)]*\)/gi, "")
+      .trim();
+
+    // Rule 5: concentration notes like (200ppb), (10ppm)
+    s = s.replace(/\(\d+(?:\.\d+)?(?:ppb|ppm|%)[^)]*\)/gi, "").trim();
+
+    // Rule 6: square bracket content, unless it contains "unclear"
+    s = s.replace(/\[[^\]]*\]/g, (m) => (/unclear/i.test(m) ? m : "")).trim();
+
+    // Rule 7: CI colour codes
+    s = s.replace(/^[^(]+\(CI\s*(\d+)\)\s*$/i, "CI $1"); // "Blue 1 (CI 42090)" → "CI 42090"
+    s = s.replace(/^(CI\s*\d+)\s*\([^)]+\)\s*$/i, "$1"); // "CI 17200 (Red No. 33)" → "CI 17200"
+    s = s.replace(/\bCI(\d+)/gi, "CI $1"); // "CI77891" → "CI 77891"
+
+    // Rule 10: remove final parenthetical if it shares >50% words with the main name
+    s = s.replace(/^(.*?)\s*\(([^)]+)\)\s*$/, (match, main, parens) => {
+      const mWords = main.toLowerCase().split(/\s+/).filter(Boolean);
+      const pWords = parens.toLowerCase().split(/\s+/).filter(Boolean);
+      if (!mWords.length || !pWords.length) return match;
+      const overlap = pWords.filter((w: string) => mWords.includes(w)).length;
+      return overlap / pWords.length > 0.5 ? main.trim() : match;
+    });
+
+    // Rule 11: vinegar standardisation
+    s = s.replace(/vinegar\s*\(acetum\)/gi, "Acetum");
+    s = s.replace(/vinegar\/acetum\/vinaigre/gi, "Acetum");
+
+    return s.trim();
+  });
+
+  return cleaned
+    .map((s) =>
+      s
+        .replace(/HEXANEDIOL_PLACEHOLDER/g, "1,2-Hexanediol")
+        .replace(/HYDROXYPROPYL_GUAR_PLACEHOLDER/g, "Hydroxypropyl Guar Hydroxypropyltrimonium Chloride")
+    )
+    .filter((s) => s.length > 0)
+    .join(", ");
+};
+
 // ─── COMPONENT ───────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
@@ -296,6 +493,10 @@ export default function HomeScreen() {
       // -- Run in Supabase: ALTER TABLE products ADD COLUMN ingredient_image_url_2 text;
       // -- Run in Supabase: DROP VIEW products_with_ingredients; recreate with ingredient_image_url, ingredient_image_url_2 included
 
+      const rawText = parsedIngredients.join(", ");
+      const cleanedText = cleanIngredients(rawText);
+      const computedQcStatus = rawText.includes("[unclear]") ? "flagged_for_laptop" : "pending";
+
       // Insert the product record
       const { data: newProduct, error: productError } = await supabase
         .from("products")
@@ -305,12 +506,17 @@ export default function HomeScreen() {
           name: productName.trim(),
           product_type: productType.trim(),
           variant: variant.trim() || null,
-          qc_status: qcStatus,
+          qc_status: computedQcStatus,
           scanned_by: scannedBy,
           product_image_url: productPhotoUrl,
           ingredient_image_url: ingredientPhotoUrl,
           ingredient_image_url_2: ingredientPhotoUrl2,
-          ingredients_text: parsedIngredients.join(", "),
+          ingredients_ocr_raw: rawText,
+          ingredients_ocr_raw_created_at: new Date().toISOString(),
+          ingredients_cleaned: cleanedText,
+          ingredients_cleaned_at: new Date().toISOString(),
+          ingredients_verified: cleanedText,
+          ingredients_verified_at: new Date().toISOString(),
         }])
         .select()
         .single();
@@ -329,11 +535,12 @@ export default function HomeScreen() {
         .eq("barcode", scannedBarcode);
       if (scanUpdateError) console.warn("[save] Failed to update scan record:", scanUpdateError.message);
 
-      // Insert ingredients — Claude returns INCI names directly, so ingredient_name = raw_text
-      if (parsedIngredients.length > 0) {
+      // Insert ingredients from cleaned text
+      const cleanedIngredients = cleanedText.split(", ").filter((s: string) => s.length > 0);
+      if (cleanedIngredients.length > 0) {
         await supabase.from("product_ingredients").delete().eq("product_id", newProductId);
 
-        const rows = parsedIngredients.map((text: string, index: number) => ({
+        const rows = cleanedIngredients.map((text: string, index: number) => ({
           product_id: newProductId,
           barcode: scannedBarcode,
           ingredient_name: text,
