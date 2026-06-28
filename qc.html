@@ -895,16 +895,16 @@ async function renderIngredients(product) {
     ? product.ingredients_verified.split(',').map(s => s.trim()).filter(Boolean)
     : [];
 
-  // Check matches against ingredients table
+  // Check matches against ingredients table using case-insensitive RPC
   let matchData = {};
   if (verifiedList.length > 0) {
-    const { data } = await db
-      .from('ingredients')
-      .select('inci_name, risk_score, banned')
-      .in('inci_name', verifiedList);
-
-    if (data) {
-      data.forEach(ing => { matchData[ing.inci_name.toUpperCase()] = ing; });
+    const { data: matchResults } = await db.rpc('match_ingredients', {
+      ingredient_names: verifiedList
+    });
+    if (matchResults) {
+      matchResults.forEach(ing => {
+        matchData[ing.inci_name.toUpperCase()] = ing;
+      });
     }
   }
 
