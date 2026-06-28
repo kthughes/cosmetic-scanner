@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Healthy Start — Ingredient QC</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --forest: #1B4332;
+    --sage: #2D6A4F;
+    --mint: #52B788;
+    --pale: #D8F3DC;
+    --cream: #F8F6F1;
+    --white: #FFFFFF;
+    --charcoal: #1C1C1C;
+    --mid: #4A4A4A;
+    --light: #8A8A8A;
+    --border: #E5E7EB;
+    --red: #DC2626;
+    --amber: #D97706;
+    --blue: #2563EB;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--cream);
+    color: var(--charcoal);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* TOP BAR */
+  .topbar {
+    background: var(--forest);
+    color: white;
+    padding: 0 24px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+
+  .topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .topbar-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--mint);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .topbar-product {
+    font-size: 0.875rem;
+    color: rgba(255,255,255,0.7);
+  }
+
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .counter {
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.5);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* FILTER BAR */
+  .filterbar {
+    background: var(--white);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .filter-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--light);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-right: 4px;
+  }
+
+  .filter-btn {
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    color: var(--mid);
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .filter-btn:hover { border-color: var(--sage); color: var(--sage); }
+
+  .filter-btn.active {
+    background: var(--forest);
+    border-color: var(--forest);
+    color: white;
+  }
+
+  .filter-count {
+    background: rgba(255,255,255,0.2);
+    border-radius: 10px;
+    padding: 1px 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+
+  .filter-btn:not(.active) .filter-count {
+    background: var(--border);
+    color: var(--mid);
+  }
+
+  .filterbar-right {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--light);
+  }
+
+  /* MAIN LAYOUT */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* LEFT — PHOTOS */
+  .photos-panel {
+    background: #1a1a1a;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .photo-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    cursor: zoom-in;
+  }
+
+  .photo-container img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    transition: transform 0.2s;
+    transform-origin: center;
+  }
+
+  .photo-container.zoomed {
+    cursor: zoom-out;
+  }
+
+  .photo-container.zoomed img {
+    transform: scale(2.5);
+    transform-origin: var(--zoom-x, 50%) var(--zoom-y, 50%);
+  }
+
+  .photo-label {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.6);
+    color: rgba(255,255,255,0.8);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+    pointer-events: none;
+  }
+
+  .photo-placeholder {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.2);
+    font-size: 0.8rem;
+  }
+
+  .photos-row {
+    display: flex;
+    flex: 1;
+    gap: 2px;
+    overflow: hidden;
+  }
+
+  /* RIGHT — QC PANEL */
+  .qc-panel {
+    background: var(--white);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .product-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--cream);
+    flex-shrink: 0;
+  }
+
+  .product-brand {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--sage);
+    margin-bottom: 4px;
+  }
+
+  .product-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--forest);
+    line-height: 1.3;
+  }
+
+  .product-variant {
+    font-size: 0.8rem;
+    color: var(--light);
+    margin-top: 2px;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 8px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+
+  .status-badge.pending { background: #FEF3C7; color: #92400E; }
+  .status-badge.flagged_for_laptop { background: #FEE2E2; color: #991B1B; }
+  .status-badge.approved { background: var(--pale); color: var(--sage); }
+  .status-badge.rejected { background: #F3F4F6; color: var(--light); }
+
+  /* INGREDIENTS SECTIONS */
+  .ingredients-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+  }
+
+  .section-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--light);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .readonly-text {
+    font-size: 0.78rem;
+    color: var(--mid);
+    line-height: 1.6;
+    background: var(--cream);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    font-family: 'SF Mono', 'Monaco', monospace;
+    word-break: break-word;
+  }
+
+  .unclear-highlight {
+    background: #FEF3C7;
+    color: #92400E;
+    border-radius: 3px;
+    padding: 1px 3px;
+    font-weight: 600;
+  }
+
+  .verified-textarea {
+    width: 100%;
+    font-size: 0.82rem;
+    color: var(--charcoal);
+    line-height: 1.6;
+    border: 1.5px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    font-family: 'SF Mono', 'Monaco', monospace;
+    resize: vertical;
+    min-height: 160px;
+    transition: border-color 0.15s;
+    background: var(--white);
+  }
+
+  .verified-textarea:focus {
+    outline: none;
+    border-color: var(--sage);
+  }
+
+  .verified-textarea.modified {
+    border-color: var(--amber);
+    background: #FFFBF0;
+  }
+
+  /* INGREDIENT CHIPS */
+  .chips-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  .chip {
+    font-size: 0.7rem;
+    padding: 3px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    color: var(--mid);
+    background: var(--white);
+  }
+
+  .chip.matched { border-color: var(--mint); color: var(--sage); background: var(--pale); }
+  .chip.restricted { border-color: #F59E0B; color: #92400E; background: #FEF3C7; font-weight: 600; }
+  .chip.banned { border-color: #EF4444; color: #991B1B; background: #FEE2E2; font-weight: 600; }
+  .chip.unclear { border-color: #EF4444; color: #991B1B; background: #FEE2E2; font-style: italic; }
+  .chip.not-in-db { border-color: #7C3AED; color: #5B21B6; background: #EDE9FE; }
+
+  /* BOTTOM ACTIONS */
+  .actions {
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--cream);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .status-row label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--mid);
+    white-space: nowrap;
+  }
+
+  .status-select {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-family: inherit;
+    background: var(--white);
+    color: var(--charcoal);
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%234A4A4A' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+  }
+
+  .status-select:focus { outline: none; border-color: var(--sage); }
+
+  .btn-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+  }
+
+  .btn {
+    padding: 10px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+    font-family: inherit;
+  }
+
+  .btn-prev {
+    background: var(--white);
+    color: var(--mid);
+    border: 1.5px solid var(--border);
+  }
+
+  .btn-prev:hover:not(:disabled) { border-color: var(--sage); color: var(--sage); }
+
+  .btn-save {
+    background: var(--forest);
+    color: white;
+  }
+
+  .btn-save:hover:not(:disabled) { background: var(--sage); }
+  .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-next {
+    background: var(--white);
+    color: var(--mid);
+    border: 1.5px solid var(--border);
+  }
+
+  .btn-next:hover:not(:disabled) { border-color: var(--sage); color: var(--sage); }
+  .btn-prev:disabled, .btn-next:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .shortcut-hint {
+    font-size: 0.68rem;
+    color: var(--light);
+    text-align: center;
+  }
+
+  /* TOAST */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--charcoal);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: transform 0.25s ease;
+    z-index: 1000;
+    white-space: nowrap;
+  }
+
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.success { background: var(--sage); }
+  .toast.error { background: var(--red); }
+
+  /* LOADING */
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--light);
+    font-size: 0.875rem;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid var(--border);
+    border-top-color: var(--mint);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--light);
+    font-size: 0.875rem;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .empty-icon { font-size: 2rem; }
+
+  /* CONFIG MODAL */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 500;
+  }
+
+  .modal {
+    background: white;
+    border-radius: 12px;
+    padding: 32px;
+    width: 440px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+
+  .modal h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--forest);
+    margin-bottom: 8px;
+  }
+
+  .modal p {
+    font-size: 0.85rem;
+    color: var(--mid);
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+
+  .modal-field {
+    margin-bottom: 16px;
+  }
+
+  .modal-label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--mid);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .modal-input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1.5px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-family: monospace;
+    color: var(--charcoal);
+  }
+
+  .modal-input:focus { outline: none; border-color: var(--sage); }
+
+  .modal-btn {
+    width: 100%;
+    padding: 12px;
+    background: var(--forest);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+
+  .modal-btn:hover { background: var(--sage); }
+</style>
+</head>
+<body>
+
+<!-- CONFIG MODAL -->
+<div class="modal-overlay" id="configModal">
+  <div class="modal">
+    <h2>🌿 Healthy Start QC</h2>
+    <p>Enter your Supabase credentials to connect. These are saved in your browser for this session only.</p>
+    <div class="modal-field">
+      <label class="modal-label">Supabase URL</label>
+      <input class="modal-input" id="supabaseUrl" placeholder="https://xxxx.supabase.co" type="text">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Supabase Anon Key</label>
+      <input class="modal-input" id="supabaseKey" placeholder="eyJ..." type="text">
+    </div>
+    <button class="modal-btn" onclick="connect()">Connect →</button>
+  </div>
+</div>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="topbar-left">
+    <span class="topbar-title">Healthy Start QC</span>
+    <span class="topbar-product" id="topbarProduct">—</span>
+  </div>
+  <div class="topbar-right">
+    <span class="counter" id="counter">— of —</span>
+  </div>
+</div>
+
+<!-- FILTER BAR -->
+<div class="filterbar">
+  <span class="filter-label">Show</span>
+  <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">
+    All <span class="filter-count" id="count-all">0</span>
+  </button>
+  <button class="filter-btn" data-filter="flagged_for_laptop" onclick="setFilter('flagged_for_laptop')">
+    ⚠️ Flagged <span class="filter-count" id="count-flagged_for_laptop">0</span>
+  </button>
+  <button class="filter-btn" data-filter="pending" onclick="setFilter('pending')">
+    Pending <span class="filter-count" id="count-pending">0</span>
+  </button>
+  <button class="filter-btn" data-filter="approved" onclick="setFilter('approved')">
+    ✅ Approved <span class="filter-count" id="count-approved">0</span>
+  </button>
+  <button class="filter-btn" data-filter="rejected" onclick="setFilter('rejected')">
+    ❌ Rejected <span class="filter-count" id="count-rejected">0</span>
+  </button>
+  <span class="filterbar-right" id="matchHint"></span>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- PHOTOS -->
+  <div class="photos-panel" id="photosPanel">
+    <div class="loading" id="photosLoading">
+      <div class="spinner"></div>
+      <span>Loading photos...</span>
+    </div>
+  </div>
+
+  <!-- QC PANEL -->
+  <div class="qc-panel">
+    <div class="product-header" id="productHeader">
+      <div class="product-brand" id="productBrand">—</div>
+      <div class="product-name" id="productName">Select a product to begin</div>
+      <div class="product-variant" id="productVariant"></div>
+      <div id="statusBadge"></div>
+    </div>
+
+    <div class="ingredients-scroll" id="ingredientsScroll">
+      <div class="empty-state">
+        <div class="empty-icon">🌿</div>
+        <span>Loading products...</span>
+      </div>
+    </div>
+
+    <div class="actions">
+      <div class="status-row">
+        <label>Status</label>
+        <select class="status-select" id="statusSelect" onchange="onStatusChange()">
+          <option value="pending">Pending</option>
+          <option value="flagged_for_laptop">⚠️ Flagged for laptop</option>
+          <option value="approved">✅ Approved</option>
+          <option value="rejected">❌ Rejected</option>
+        </select>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-prev" id="btnPrev" onclick="navigate(-1)" disabled>← Prev</button>
+        <button class="btn btn-save" id="btnSave" onclick="saveProduct()">Save</button>
+        <button class="btn btn-next" id="btnNext" onclick="navigate(1)" disabled>Next →</button>
+      </div>
+      <div class="shortcut-hint">⌘S / Ctrl+S to save · ← → arrow keys to navigate</div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── STATE ───────────────────────────────────────────────────────────────────
+let db = null;
+let allProducts = [];
+let filteredProducts = [];
+let currentIndex = 0;
+let currentFilter = 'all';
+let ingredientMatchCache = {};
+let isModified = false;
+
+// ─── CONNECT ─────────────────────────────────────────────────────────────────
+async function connect() {
+  const url = document.getElementById('supabaseUrl').value.trim();
+  const key = document.getElementById('supabaseKey').value.trim();
+
+  if (!url || !key) {
+    showToast('Please enter both URL and key', 'error');
+    return;
+  }
+
+  try {
+    db = window.supabase.createClient(url, key);
+    // Test connection
+    const { error } = await db.from('products').select('id').limit(1);
+    if (error) throw error;
+
+    sessionStorage.setItem('sb_url', url);
+    sessionStorage.setItem('sb_key', key);
+
+    document.getElementById('configModal').style.display = 'none';
+    await loadProducts();
+  } catch (e) {
+    showToast('Connection failed: ' + e.message, 'error');
+  }
+}
+
+// ─── LOAD PRODUCTS ────────────────────────────────────────────────────────────
+async function loadProducts() {
+  showPhotosLoading(true);
+
+  const { data, error } = await db
+    .from('products')
+    .select(`
+      id, brand, name, variant, barcode, qc_status,
+      product_image_url, ingredient_image_url, ingredient_image_url_2,
+      ingredients_ocr_raw, ingredients_cleaned, ingredients_verified,
+      ingredients_ocr_raw_created_at, ingredients_verified_at
+    `)
+    .order('qc_status', { ascending: true })
+    .order('brand', { ascending: true })
+    .order('name', { ascending: true });
+
+  if (error) {
+    showToast('Error loading products: ' + error.message, 'error');
+    return;
+  }
+
+  allProducts = data || [];
+  updateCounts();
+  applyFilter(currentFilter);
+  showPhotosLoading(false);
+}
+
+// ─── COUNTS ───────────────────────────────────────────────────────────────────
+function updateCounts() {
+  const counts = { all: allProducts.length, pending: 0, flagged_for_laptop: 0, approved: 0, rejected: 0 };
+  allProducts.forEach(p => { if (counts[p.qc_status] !== undefined) counts[p.qc_status]++; });
+  Object.keys(counts).forEach(k => {
+    const el = document.getElementById('count-' + k);
+    if (el) el.textContent = counts[k];
+  });
+}
+
+// ─── FILTER ───────────────────────────────────────────────────────────────────
+function setFilter(filter) {
+  currentFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`[data-filter="${filter}"]`).classList.add('active');
+  applyFilter(filter);
+}
+
+function applyFilter(filter) {
+  filteredProducts = filter === 'all'
+    ? [...allProducts]
+    : allProducts.filter(p => p.qc_status === filter);
+
+  currentIndex = 0;
+  if (filteredProducts.length > 0) {
+    renderProduct(filteredProducts[0]);
+  } else {
+    renderEmpty();
+  }
+  updateNavButtons();
+}
+
+// ─── NAVIGATE ─────────────────────────────────────────────────────────────────
+function navigate(dir) {
+  if (isModified) {
+    if (!confirm('You have unsaved changes. Continue without saving?')) return;
+  }
+  currentIndex = Math.max(0, Math.min(filteredProducts.length - 1, currentIndex + dir));
+  renderProduct(filteredProducts[currentIndex]);
+  updateNavButtons();
+}
+
+function updateNavButtons() {
+  document.getElementById('btnPrev').disabled = currentIndex === 0;
+  document.getElementById('btnNext').disabled = currentIndex >= filteredProducts.length - 1;
+  document.getElementById('counter').textContent =
+    filteredProducts.length > 0
+      ? `${currentIndex + 1} of ${filteredProducts.length}`
+      : '0 of 0';
+}
+
+// ─── RENDER PRODUCT ───────────────────────────────────────────────────────────
+async function renderProduct(product) {
+  if (!product) return;
+  isModified = false;
+
+  // Top bar
+  document.getElementById('topbarProduct').textContent = `${product.brand} — ${product.name}`;
+
+  // Header
+  document.getElementById('productBrand').textContent = product.brand || '—';
+  document.getElementById('productName').textContent = product.name || '—';
+  document.getElementById('productVariant').textContent = product.variant || '';
+
+  const badge = document.getElementById('statusBadge');
+  const statusLabels = {
+    pending: 'Pending review',
+    flagged_for_laptop: '⚠️ Flagged for laptop',
+    approved: '✅ Approved',
+    rejected: '❌ Rejected'
+  };
+  badge.innerHTML = `<span class="status-badge ${product.qc_status}">${statusLabels[product.qc_status] || product.qc_status}</span>`;
+
+  // Status dropdown
+  document.getElementById('statusSelect').value = product.qc_status;
+
+  // Photos
+  renderPhotos(product);
+
+  // Ingredients
+  await renderIngredients(product);
+}
+
+// ─── RENDER PHOTOS ────────────────────────────────────────────────────────────
+function renderPhotos(product) {
+  const panel = document.getElementById('photosPanel');
+  panel.innerHTML = '';
+
+  // Product photo (top, smaller)
+  if (product.product_image_url) {
+    const productRow = document.createElement('div');
+    productRow.style.cssText = 'height: 140px; position: relative; flex-shrink: 0; background: #111;';
+    productRow.innerHTML = `
+      <span class="photo-label">Product</span>
+      <img src="${product.product_image_url}" style="width:100%; height:100%; object-fit:contain;">
+    `;
+    panel.appendChild(productRow);
+  }
+
+  // Ingredient photos (main area, zoomable)
+  const ingRow = document.createElement('div');
+  ingRow.className = 'photos-row';
+
+  const photos = [
+    { url: product.ingredient_image_url, label: 'Ingredients' },
+    { url: product.ingredient_image_url_2, label: 'Ingredients (2)' }
+  ].filter(p => p.url);
+
+  if (photos.length === 0) {
+    ingRow.innerHTML = '<div class="photo-placeholder">No ingredient photo</div>';
+  } else {
+    photos.forEach(photo => {
+      const container = document.createElement('div');
+      container.className = 'photo-container';
+      container.innerHTML = `
+        <span class="photo-label">${photo.label}</span>
+        <img src="${photo.url}" alt="${photo.label}">
+      `;
+
+      // Zoom on click
+      container.addEventListener('click', function(e) {
+        const rect = container.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width * 100).toFixed(1) + '%';
+        const y = ((e.clientY - rect.top) / rect.height * 100).toFixed(1) + '%';
+        container.style.setProperty('--zoom-x', x);
+        container.style.setProperty('--zoom-y', y);
+        container.classList.toggle('zoomed');
+      });
+
+      ingRow.appendChild(container);
+    });
+  }
+
+  panel.appendChild(ingRow);
+}
+
+// ─── RENDER INGREDIENTS ───────────────────────────────────────────────────────
+async function renderIngredients(product) {
+  const scroll = document.getElementById('ingredientsScroll');
+  scroll.innerHTML = '';
+
+  // Get matched ingredients for this product
+  const verifiedList = product.ingredients_verified
+    ? product.ingredients_verified.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+
+  // Check matches against ingredients table
+  let matchData = {};
+  if (verifiedList.length > 0) {
+    const { data } = await db
+      .from('ingredients')
+      .select('inci_name, risk_score, banned')
+      .in('inci_name', verifiedList);
+
+    if (data) {
+      data.forEach(ing => { matchData[ing.inci_name.toUpperCase()] = ing; });
+    }
+  }
+
+  // OCR Raw (read only)
+  if (product.ingredients_ocr_raw) {
+    const label = document.createElement('div');
+    label.className = 'section-label';
+    label.textContent = 'OCR Raw (read only)';
+    scroll.appendChild(label);
+
+    const rawDiv = document.createElement('div');
+    rawDiv.className = 'readonly-text';
+    rawDiv.innerHTML = highlightUnclear(escapeHtml(product.ingredients_ocr_raw));
+    scroll.appendChild(rawDiv);
+  }
+
+  // Cleaned (read only)
+  if (product.ingredients_cleaned) {
+    const label = document.createElement('div');
+    label.className = 'section-label';
+    label.textContent = 'Auto-cleaned (read only)';
+    scroll.appendChild(label);
+
+    const cleanDiv = document.createElement('div');
+    cleanDiv.className = 'readonly-text';
+    cleanDiv.style.color = '#6B7280';
+    cleanDiv.innerHTML = highlightUnclear(escapeHtml(product.ingredients_cleaned));
+    scroll.appendChild(cleanDiv);
+  }
+
+  // Verified (editable)
+  const verLabel = document.createElement('div');
+  verLabel.className = 'section-label';
+  verLabel.textContent = 'Verified (edit this)';
+  scroll.appendChild(verLabel);
+
+  const textarea = document.createElement('textarea');
+  textarea.className = 'verified-textarea';
+  textarea.id = 'verifiedTextarea';
+  textarea.value = product.ingredients_verified || '';
+  textarea.placeholder = 'Comma-separated ingredient list...';
+  textarea.rows = 8;
+  textarea.addEventListener('input', () => {
+    isModified = true;
+    textarea.classList.add('modified');
+    updateChips(textarea.value, matchData);
+  });
+  scroll.appendChild(textarea);
+
+  // Match chips
+  const chipsLabel = document.createElement('div');
+  chipsLabel.className = 'section-label';
+  chipsLabel.textContent = 'Ingredient match status';
+  scroll.appendChild(chipsLabel);
+
+  // Legend
+  const legend = document.createElement('div');
+  legend.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;';
+  legend.innerHTML = `
+    <span class="chip matched" style="font-size:0.65rem;">🟢 Safe</span>
+    <span class="chip restricted" style="font-size:0.65rem;">🟠 Restricted</span>
+    <span class="chip banned" style="font-size:0.65rem;">🔴 Banned</span>
+    <span class="chip unclear" style="font-size:0.65rem;">❗Unclear</span>
+    <span class="chip not-in-db" style="font-size:0.65rem;">🟣 Not in DB</span>
+  `;
+  scroll.appendChild(legend);
+
+  const chipsWrap = document.createElement('div');
+  chipsWrap.className = 'chips-wrap';
+  chipsWrap.id = 'chipsWrap';
+  scroll.appendChild(chipsWrap);
+
+  updateChips(product.ingredients_verified || '', matchData);
+
+  // Match summary
+  const matchLabel = document.createElement('div');
+  matchLabel.className = 'section-label';
+  matchLabel.style.marginTop = '8px';
+  matchLabel.id = 'matchSummary';
+  scroll.appendChild(matchLabel);
+
+  updateMatchSummary(verifiedList, matchData);
+}
+
+function updateChips(verifiedText, matchData) {
+  const wrap = document.getElementById('chipsWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  const ingredients = verifiedText.split(',').map(s => s.trim()).filter(Boolean);
+  ingredients.forEach(ing => {
+    const chip = document.createElement('span');
+    const upper = ing.toUpperCase();
+    const isUnclear = ing.toLowerCase().includes('[unclear]');
+    const matchedIng = matchData[upper];
+
+    if (isUnclear) {
+      chip.className = 'chip unclear';
+      chip.textContent = ing;
+    } else if (matchedIng) {
+      if (matchedIng.risk_score >= 100) {
+        chip.className = 'chip banned';
+        chip.title = `Banned — risk score: ${matchedIng.risk_score}`;
+      } else if (matchedIng.risk_score > 0) {
+        chip.className = 'chip restricted';
+        chip.title = `Restricted — risk score: ${matchedIng.risk_score}`;
+      } else {
+        chip.className = 'chip matched';
+      }
+      chip.textContent = ing;
+    } else {
+      chip.className = 'chip not-in-db';
+      chip.textContent = ing;
+      chip.title = 'Not yet in ingredients database';
+    }
+    wrap.appendChild(chip);
+  });
+
+  updateMatchSummary(ingredients, matchData);
+}
+
+function updateMatchSummary(ingredients, matchData) {
+  const el = document.getElementById('matchSummary');
+  if (!el || !ingredients.length) return;
+  const unclear = ingredients.filter(ing => ing.toLowerCase().includes('[unclear]')).length;
+  const matched = ingredients.filter(ing =>
+    !ing.toLowerCase().includes('[unclear]') && matchData[ing.toUpperCase()]
+  ).length;
+  const notInDb = ingredients.filter(ing =>
+    !ing.toLowerCase().includes('[unclear]') && !matchData[ing.toUpperCase()]
+  ).length;
+  const pct = Math.round(matched / ingredients.length * 100);
+  el.textContent = `${matched} matched · ${notInDb} not in DB · ${unclear} unclear — ${pct}% match rate`;
+  el.style.color = pct >= 80 ? 'var(--sage)' : pct >= 60 ? 'var(--amber)' : 'var(--red)';
+}
+
+// ─── SAVE ─────────────────────────────────────────────────────────────────────
+async function saveProduct() {
+  const product = filteredProducts[currentIndex];
+  if (!product) return;
+
+  const verified = document.getElementById('verifiedTextarea').value.trim();
+  const status = document.getElementById('statusSelect').value;
+
+  document.getElementById('btnSave').disabled = true;
+  document.getElementById('btnSave').textContent = 'Saving...';
+
+  try {
+    // REJECTED — delete everything and remove from local list
+    if (status === 'rejected') {
+      const confirmed = confirm(`Delete "${product.brand} — ${product.name}" permanently?\n\nThis will remove the product, all ingredients and all photos. This cannot be undone.`);
+      if (!confirmed) {
+        document.getElementById('btnSave').disabled = false;
+        document.getElementById('btnSave').textContent = 'Save';
+        return;
+      }
+
+      // Delete photos from storage
+      const photoFiles = [
+        product.product_image_url,
+        product.ingredient_image_url,
+        product.ingredient_image_url_2
+      ].filter(Boolean).map(url => {
+        // Extract filename from full Supabase storage URL
+        const parts = url.split('/storage/v1/object/public/');
+        if (parts.length < 2) return null;
+        const [bucket, ...pathParts] = parts[1].split('/');
+        return { bucket, path: pathParts.join('/') };
+      }).filter(Boolean);
+
+      for (const file of photoFiles) {
+        await db.storage.from(file.bucket).remove([file.path]);
+        // Don't throw on storage errors — file may already be gone
+      }
+
+      // Delete product_ingredients (cascade should handle this but be explicit)
+      await db.from('product_ingredients').delete().eq('product_id', product.id);
+
+      // Delete product
+      const { error: deleteError } = await db.from('products').delete().eq('id', product.id);
+      if (deleteError) throw deleteError;
+
+      // Remove from local state
+      const deletedIndex = currentIndex;
+      allProducts = allProducts.filter(p => p.id !== product.id);
+      filteredProducts = filteredProducts.filter(p => p.id !== product.id);
+      updateCounts();
+
+      showToast('🗑️ Product deleted', 'success');
+
+      // Navigate to next product or previous if at end
+      currentIndex = Math.min(deletedIndex, filteredProducts.length - 1);
+      if (filteredProducts.length > 0) {
+        renderProduct(filteredProducts[currentIndex]);
+      } else {
+        renderEmpty();
+      }
+      updateNavButtons();
+
+      document.getElementById('btnSave').disabled = false;
+      document.getElementById('btnSave').textContent = 'Save';
+      return;
+    }
+
+    // 1. Update products table
+    const { error: updateError } = await db
+      .from('products')
+      .update({
+        ingredients_verified: verified,
+        ingredients_verified_at: new Date().toISOString(),
+        qc_status: status
+      })
+      .eq('id', product.id);
+
+    if (updateError) throw updateError;
+
+    // 2. If approved — repopulate product_ingredients
+    if (status === 'approved') {
+      // Delete existing rows
+      const { error: deleteError } = await db
+        .from('product_ingredients')
+        .delete()
+        .eq('product_id', product.id);
+
+      if (deleteError) throw deleteError;
+
+      // Insert fresh rows from ingredients_verified
+      const ingredients = verified.split(',').map(s => s.trim()).filter(Boolean);
+      if (ingredients.length > 0) {
+        const rows = ingredients.map((ing, idx) => ({
+          product_id: product.id,
+          ingredient_name: ing,
+          raw_text: ing,
+          position: idx + 1,
+          brand: product.brand,
+          product_name: product.name,
+          variant: product.variant,
+          barcode: product.barcode,
+          created_at: new Date().toISOString()
+        }));
+
+        const { error: insertError } = await db
+          .from('product_ingredients')
+          .insert(rows);
+
+        if (insertError) throw insertError;
+      }
+    }
+
+    // 3. Update local state
+    product.ingredients_verified = verified;
+    product.qc_status = status;
+    isModified = false;
+
+    // Update textarea style
+    const ta = document.getElementById('verifiedTextarea');
+    if (ta) ta.classList.remove('modified');
+
+    // Update badge
+    const statusLabels = {
+      pending: 'Pending review',
+      flagged_for_laptop: '⚠️ Flagged for laptop',
+      approved: '✅ Approved',
+      rejected: '❌ Rejected'
+    };
+    document.getElementById('statusBadge').innerHTML =
+      `<span class="status-badge ${status}">${statusLabels[status]}</span>`;
+
+    updateCounts();
+    showToast(status === 'approved' ? '✅ Approved & ingredients updated' : '💾 Saved', 'success');
+
+    // Auto-advance on approve/reject
+    if ((status === 'approved' || status === 'rejected') && currentIndex < filteredProducts.length - 1) {
+      setTimeout(() => navigate(1), 600);
+    }
+
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  } finally {
+    document.getElementById('btnSave').disabled = false;
+    document.getElementById('btnSave').textContent = 'Save';
+  }
+}
+
+// ─── STATUS CHANGE ────────────────────────────────────────────────────────────
+function onStatusChange() {
+  isModified = true;
+}
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+function highlightUnclear(text) {
+  return text.replace(/\[unclear\]/gi, '<span class="unclear-highlight">[unclear]</span>');
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function showPhotosLoading(show) {
+  const loading = document.getElementById('photosLoading');
+  if (loading) loading.style.display = show ? 'flex' : 'none';
+}
+
+function renderEmpty() {
+  document.getElementById('ingredientsScroll').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-icon">✅</div>
+      <span>No products in this filter</span>
+    </div>
+  `;
+  document.getElementById('topbarProduct').textContent = '—';
+  document.getElementById('productBrand').textContent = '—';
+  document.getElementById('productName').textContent = 'No products found';
+  document.getElementById('productVariant').textContent = '';
+  document.getElementById('statusBadge').innerHTML = '';
+  document.getElementById('photosPanel').innerHTML = '<div class="photo-placeholder" style="color:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; height:100%;">No product selected</div>';
+}
+
+function showToast(msg, type = '') {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = 'toast show ' + type;
+  setTimeout(() => { toast.className = 'toast'; }, 2500);
+}
+
+// ─── KEYBOARD SHORTCUTS ───────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  // Don't fire shortcuts when typing in textarea
+  if (document.activeElement.tagName === 'TEXTAREA') {
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      e.preventDefault();
+      saveProduct();
+    }
+    return;
+  }
+
+  if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+    e.preventDefault();
+    saveProduct();
+  } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (currentIndex < filteredProducts.length - 1) navigate(1);
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (currentIndex > 0) navigate(-1);
+  }
+});
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  // Check for saved credentials
+  const url = sessionStorage.getItem('sb_url');
+  const key = sessionStorage.getItem('sb_key');
+
+  if (url && key) {
+    document.getElementById('supabaseUrl').value = url;
+    document.getElementById('supabaseKey').value = key;
+    connect();
+  }
+});
+</script>
+</body>
+</html>
