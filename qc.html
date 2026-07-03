@@ -633,6 +633,9 @@
   <button class="filter-btn" data-filter="rejected" onclick="setFilter('rejected')">
     ❌ Rejected <span class="filter-count" id="count-rejected">0</span>
   </button>
+  <button class="filter-btn" id="btnScanIssues" onclick="scanForIssues()" style="margin-left:auto;background:#7C3AED;color:white;border-color:#7C3AED;">
+    🔍 Scan for Issues
+  </button>
   <span class="filterbar-right" id="matchHint"></span>
 </div>
 
@@ -749,6 +752,87 @@ async function loadProducts() {
   showPhotosLoading(false);
 }
 
+// ─── SCAN FOR ISSUES ─────────────────────────────────────────────────────────
+async function scanForIssues() {
+  const btn = document.getElementById('btnScanIssues');
+  btn.disabled = true;
+  btn.textContent = '⏳ Scanning...';
+
+  try {
+    // Only scan products that aren't already approved or rejected
+    const toScan = allProducts.filter(p => p.qc_status !== 'approved' && p.qc_status !== 'rejected');
+    if (toScan.length === 0) {
+      showToast('No pending or flagged products to scan', '');
+      return;
+    }
+
+    // Collect all unique ingredients across all products in one pass
+    const allIngredients = new Set();
+    toScan.forEach(p => {
+      if (p.ingredients_verified) {
+        p.ingredients_verified.split(', ').map(s => s.trim()).filter(Boolean).forEach(s => allIngredients.add(s));
+      }
+    });
+
+    // Single RPC call for all ingredients
+    const { data: matchResults } = await db.rpc('match_ingredients', {
+      ingredient_names: [...allIngredients]
+    });
+
+    const matchData = {};
+    if (matchResults) {
+      matchResults.forEach(ing => { matchData[ing.inci_name.toUpperCase()] = ing; });
+    }
+
+    // Determine which products need flagging
+    const toFlag = [];
+    toScan.forEach(p => {
+      if (p.qc_status === 'flagged_for_laptop') return; // already flagged
+
+      const hasUnclear = p.ingredients_ocr_raw && /\[unclear\]/i.test(p.ingredients_ocr_raw);
+      if (hasUnclear) { toFlag.push(p); return; }
+
+      if (!p.ingredients_verified) return;
+      const ingredients = p.ingredients_verified.split(', ').map(s => s.trim()).filter(Boolean);
+      const hasBanned = ingredients.some(ing => {
+        const match = matchData[ing.toUpperCase()];
+        return match && match.banned;
+      });
+      const hasUnmatched = ingredients.some(ing =>
+        !ing.toLowerCase().includes('[unclear]') && !matchData[ing.toUpperCase()]
+      );
+
+      if (hasBanned || hasUnmatched) toFlag.push(p);
+    });
+
+    if (toFlag.length === 0) {
+      showToast('✅ No issues found — all products look clean', 'success');
+      return;
+    }
+
+    // Batch update in Supabase
+    const ids = toFlag.map(p => p.id);
+    const { error: updateError } = await db
+      .from('products')
+      .update({ qc_status: 'flagged_for_laptop' })
+      .in('id', ids);
+
+    if (updateError) throw updateError;
+
+    // Update local state
+    toFlag.forEach(p => { p.qc_status = 'flagged_for_laptop'; });
+    updateCounts();
+    applyFilter(currentFilter);
+
+    showToast(`⚠️ Flagged ${toFlag.length} product${toFlag.length === 1 ? '' : 's'} with issues`, 'error');
+  } catch (e) {
+    showToast('Scan failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 Scan for Issues';
+  }
+}
+
 // ─── COUNTS ───────────────────────────────────────────────────────────────────
 function updateCounts() {
   const counts = { all: allProducts.length, pending: 0, flagged_for_laptop: 0, approved: 0, rejected: 0 };
@@ -772,9 +856,9 @@ function applyFilter(filter) {
     ? [...allProducts]
     : allProducts.filter(p => p.qc_status === filter);
 
-  currentIndex = 0;
+  currentIndex = filter === 'approved' ? filteredProducts.length - 1 : 0;
   if (filteredProducts.length > 0) {
-    renderProduct(filteredProducts[0]);
+    renderProduct(filteredProducts[currentIndex]);
   } else {
     renderEmpty();
   }
@@ -892,7 +976,7 @@ async function renderIngredients(product) {
 
   // Get matched ingredients for this product
   const verifiedList = product.ingredients_verified
-    ? product.ingredients_verified.split(',').map(s => s.trim()).filter(Boolean)
+    ? product.ingredients_verified.split(', ').map(s => s.trim()).filter(Boolean)
     : [];
 
   // Check matches against ingredients table using case-insensitive RPC
@@ -994,7 +1078,7 @@ function updateChips(verifiedText, matchData) {
   if (!wrap) return;
   wrap.innerHTML = '';
 
-  const ingredients = verifiedText.split(',').map(s => s.trim()).filter(Boolean);
+  const ingredients = verifiedText.split(', ').map(s => s.trim()).filter(Boolean);
   ingredients.forEach(ing => {
     const chip = document.createElement('span');
     const upper = ing.toUpperCase();
@@ -1041,6 +1125,124 @@ function updateMatchSummary(ingredients, matchData) {
   el.style.color = pct >= 80 ? 'var(--sage)' : pct >= 60 ? 'var(--amber)' : 'var(--red)';
 }
 
+// ─── RULE SUGGESTIONS ────────────────────────────────────────────────────────
+
+function detectRuleChanges(cleanedText, verifiedText) {
+  if (!cleanedText || !verifiedText) return [];
+  const cleanedList = cleanedText.split(', ').map(s => s.trim()).filter(Boolean);
+  const verifiedList = verifiedText.split(', ').map(s => s.trim()).filter(Boolean);
+
+  const missingFromVerified = cleanedList.filter(c =>
+    !c.toLowerCase().includes('[unclear]') &&
+    !verifiedList.some(v => v === c)
+  );
+  const newInVerified = verifiedList.filter(v =>
+    !v.toLowerCase().includes('[unclear]') &&
+    !cleanedList.some(c => c === v)
+  );
+
+  const rules = [];
+  missingFromVerified.forEach((raw, i) => {
+    const suggested_cleaned = newInVerified[i] || null;
+    rules.push({ raw_name: raw, suggested_cleaned, type: suggested_cleaned ? 'rename' : 'deletion' });
+  });
+  if (newInVerified.length > missingFromVerified.length) {
+    newInVerified.slice(missingFromVerified.length).forEach(v => {
+      rules.push({ raw_name: null, suggested_cleaned: v, type: 'addition' });
+    });
+  }
+  return rules;
+}
+
+async function createCleanupRule(rawName, cleanedName, rowElement) {
+  console.log('createCleanupRule called:', { rawName, cleanedName, same: rawName === cleanedName });
+  if (!rawName || !cleanedName || rawName === cleanedName) {
+    showToast('Raw and cleaned names must be different', 'error');
+    return;
+  }
+  try {
+    const { data, error } = await db
+      .from('cleanup_rules')
+      .upsert({ raw_name: rawName.toLowerCase(), cleaned_name: cleanedName }, { onConflict: 'raw_name' })
+      .select();
+    if (error) throw error;
+    if (!data || data.length === 0) throw new Error('No rows written — check Supabase RLS allows INSERT/UPDATE on cleanup_rules');
+    showToast(`✅ Rule saved: "${rawName}" → "${cleanedName}"`, 'success');
+    if (rowElement) rowElement.remove();
+  } catch (e) {
+    showToast('Failed to save rule: ' + e.message, 'error');
+  }
+}
+
+function showRuleModal(renames) {
+  return new Promise(resolve => {
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;';
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:white;border-radius:12px;padding:24px;max-width:580px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+
+    const heading = document.createElement('div');
+    heading.style.cssText = 'font-size:1rem;font-weight:700;color:#1a1a1a;margin-bottom:4px;';
+    heading.textContent = '💡 Save changes as cleanup rules?';
+    modal.appendChild(heading);
+
+    const sub = document.createElement('div');
+    sub.style.cssText = 'font-size:0.8rem;color:#666;margin-bottom:16px;line-height:1.4;';
+    sub.textContent = 'These ingredients were changed during QC. Click "Make a rule" on any you want applied automatically in future scans. Skipped ones are ignored.';
+    modal.appendChild(sub);
+
+    const list = document.createElement('div');
+    modal.appendChild(list);
+
+    for (const rule of renames) {
+      const row = document.createElement('div');
+      row.style.cssText = 'border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:8px;';
+
+      const fromTo = document.createElement('div');
+      fromTo.style.cssText = 'font-size:0.78rem;color:#374151;margin-bottom:8px;';
+      fromTo.innerHTML =
+        `<div style="margin-bottom:4px;"><span style="color:#9ca3af;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em;">From</span><br><code style="font-size:0.8rem;">${escapeHtml(rule.raw_name)}</code></div>` +
+        `<div><span style="color:#9ca3af;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em;">To</span><br><input type="text" value="${escapeHtml(rule.suggested_cleaned)}" style="width:100%;padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:0.8rem;font-family:monospace;box-sizing:border-box;"></div>`;
+      row.appendChild(fromTo);
+
+      const btns = document.createElement('div');
+      btns.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+
+      const makeBtn = document.createElement('button');
+      makeBtn.textContent = '✅ Make a rule';
+      makeBtn.style.cssText = 'background:#2D6A4F;color:white;border:none;border-radius:6px;padding:6px 14px;font-size:0.78rem;cursor:pointer;font-weight:600;';
+      makeBtn.onclick = async () => {
+        const input = row.querySelector('input');
+        const cleanedName = input ? input.value.trim() : rule.suggested_cleaned;
+        await createCleanupRule(rule.raw_name, cleanedName, row);
+      };
+
+      const skipBtn = document.createElement('button');
+      skipBtn.textContent = 'Skip';
+      skipBtn.style.cssText = 'background:white;border:1px solid #d1d5db;color:#374151;border-radius:6px;padding:6px 14px;font-size:0.78rem;cursor:pointer;';
+      skipBtn.onclick = () => row.remove();
+
+      btns.appendChild(makeBtn);
+      btns.appendChild(skipBtn);
+      row.appendChild(btns);
+      list.appendChild(row);
+    }
+
+    const doneBtn = document.createElement('button');
+    doneBtn.textContent = 'Done';
+    doneBtn.style.cssText = 'margin-top:16px;width:100%;background:#f3f4f6;border:1px solid #d1d5db;color:#374151;border-radius:8px;padding:10px;font-size:0.85rem;font-weight:600;cursor:pointer;';
+    doneBtn.onclick = () => {
+      document.body.removeChild(backdrop);
+      resolve();
+    };
+    modal.appendChild(doneBtn);
+
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+  });
+}
+
 // ─── SAVE ─────────────────────────────────────────────────────────────────────
 async function saveProduct() {
   const product = filteredProducts[currentIndex];
@@ -1080,12 +1282,17 @@ async function saveProduct() {
         // Don't throw on storage errors — file may already be gone
       }
 
-      // Delete product_ingredients (cascade should handle this but be explicit)
-      await db.from('product_ingredients').delete().eq('product_id', product.id);
+      // Delete product_ingredients
+      const { error: piError } = await db.from('product_ingredients').delete().eq('product_id', product.id);
+      if (piError) throw new Error('Failed to delete ingredients: ' + piError.message);
+
+      // Delete scans referencing this product
+      const { error: scansError } = await db.from('scans').delete().eq('product_id', product.id);
+      if (scansError) throw new Error('Failed to delete scans: ' + scansError.message);
 
       // Delete product
       const { error: deleteError } = await db.from('products').delete().eq('id', product.id);
-      if (deleteError) throw deleteError;
+      if (deleteError) throw new Error('Failed to delete product: ' + deleteError.message);
 
       // Remove from local state
       const deletedIndex = currentIndex;
@@ -1132,7 +1339,7 @@ async function saveProduct() {
       if (deleteError) throw deleteError;
 
       // Insert fresh rows from ingredients_verified
-      const ingredients = verified.split(',').map(s => s.trim()).filter(Boolean);
+      const ingredients = verified.split(', ').map(s => s.trim()).filter(Boolean);
       if (ingredients.length > 0) {
         const rows = ingredients.map((ing, idx) => ({
           product_id: product.id,
@@ -1176,9 +1383,20 @@ async function saveProduct() {
     updateCounts();
     showToast(status === 'approved' ? '✅ Approved & ingredients updated' : '💾 Saved', 'success');
 
-    // Auto-advance on approve/reject
+    // Detect ingredient changes and offer to save as cleanup rules
+    const ruleChanges = detectRuleChanges(product.ingredients_cleaned, verified);
+    const renames = ruleChanges.filter(r => r.type === 'rename' && r.raw_name && r.suggested_cleaned);
+
+    // Auto-advance on approve/reject — suppress if showing rule modal, navigate after dismiss
     if ((status === 'approved' || status === 'rejected') && currentIndex < filteredProducts.length - 1) {
-      setTimeout(() => navigate(1), 600);
+      if (renames.length > 0) {
+        await showRuleModal(renames);
+        navigate(1);
+      } else {
+        setTimeout(() => navigate(1), 600);
+      }
+    } else if (renames.length > 0) {
+      await showRuleModal(renames);
     }
 
   } catch (e) {

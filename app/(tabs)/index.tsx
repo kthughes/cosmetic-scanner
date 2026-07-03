@@ -54,8 +54,10 @@ const AQUA_VARIANTS = new Set([
 
 const cleanIngredients = (rawText: string, cleanupRules: Map<string, string> = new Map()): string => {
   let text = rawText;
-  text = text.replace(/1,2-Hexanediol/gi, "HEXANEDIOL_PLACEHOLDER");
+  text = text.replace(/1,\s*2-Hexanediol/gi, "HEXANEDIOL_PLACEHOLDER");
   text = text.replace(/Hydroxypropyl Guar, Hydroxypropyltrimonium Chloride/gi, "HYDROXYPROPYL_GUAR_PLACEHOLDER");
+  text = text.replace(/2-Oleamido-1,3-Octadecanediol/gi, "OLEAMIDO_PLACEHOLDER");
+  text = text.replace(/2-Oleamido-1,\s*3\s*Octadecanediol/gi, "OLEAMIDO_PLACEHOLDER");
 
   const cleaned = text.split(",").map((raw) => {
     let s = raw.trim(); // Rule 1
@@ -114,6 +116,7 @@ const cleanIngredients = (rawText: string, cleanupRules: Map<string, string> = n
       s
         .replace(/HEXANEDIOL_PLACEHOLDER/g, "1,2-Hexanediol")
         .replace(/HYDROXYPROPYL_GUAR_PLACEHOLDER/g, "Hydroxypropyl Guar Hydroxypropyltrimonium Chloride")
+        .replace(/OLEAMIDO_PLACEHOLDER/g, "2-Oleamido-1,3-Octadecanediol")
     )
     .filter((s) => s.length > 0)
     .join(", ");

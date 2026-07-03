@@ -52,6 +52,8 @@ const AQUA_VARIANTS = new Set([
   "aqua / water",
   "aqua/water/eau",
   "aqua/water",
+  "water/aqua/eau",
+  "water/aqua",
   "water (aqua)",
   "water(aqua)",
   "water / aqua",
@@ -130,8 +132,10 @@ function cleanIngredient(raw, cleanupRules = new Map()) {
 
 function cleanIngredientsList(ocrRaw, cleanupRules = new Map()) {
   const safed = ocrRaw
-    .replace(/1,2-hexanediol/gi, "HEXANEDIOL_PLACEHOLDER")
-    .replace(/hydroxypropyl guar,\s*hydroxypropyltrimonium chloride/gi, "HYDROXYPROPYL_GUAR_PLACEHOLDER");
+    .replace(/1,\s*2-hexanediol/gi, "HEXANEDIOL_PLACEHOLDER")
+    .replace(/hydroxypropyl guar,\s*hydroxypropyltrimonium chloride/gi, "HYDROXYPROPYL_GUAR_PLACEHOLDER")
+    .replace(/2-oleamido-1,3-octadecanediol/gi, "OLEAMIDO_PLACEHOLDER")
+    .replace(/2-oleamido-1,\s*3\s*octadecanediol/gi, "OLEAMIDO_PLACEHOLDER");
   const cleaned = safed
     .split(",")
     .map(s => cleanIngredient(s, cleanupRules))
@@ -139,7 +143,8 @@ function cleanIngredientsList(ocrRaw, cleanupRules = new Map()) {
     .join(", ");
   return cleaned
     .replace(/HEXANEDIOL_PLACEHOLDER/g, "1,2-Hexanediol")
-    .replace(/HYDROXYPROPYL_GUAR_PLACEHOLDER/g, "Hydroxypropyl Guar Hydroxypropyltrimonium Chloride");
+    .replace(/HYDROXYPROPYL_GUAR_PLACEHOLDER/g, "Hydroxypropyl Guar Hydroxypropyltrimonium Chloride")
+    .replace(/OLEAMIDO_PLACEHOLDER/g, "2-Oleamido-1,3-Octadecanediol");
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -149,6 +154,8 @@ async function main() {
     .from("products")
     .select("id, brand, name, qc_status, ingredients_ocr_raw")
     .not("ingredients_ocr_raw", "is", null)
+    .neq("qc_status", "rejected")
+    .neq("qc_status", "approved")
     .order("created_at", { ascending: false });
 
   if (fetchError) {
@@ -174,8 +181,8 @@ async function main() {
 
       const hasUnclear = /\[unclear\]/i.test(product.ingredients_ocr_raw);
       let newQcStatus;
-      if (product.qc_status === "approved") {
-        newQcStatus = "approved";
+      if (product.qc_status === "approved" || product.qc_status === "rejected") {
+        newQcStatus = product.qc_status;
       } else if (hasUnclear) {
         newQcStatus = "flagged_for_laptop";
       } else {
