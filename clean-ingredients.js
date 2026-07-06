@@ -196,7 +196,6 @@ async function main() {
           ingredients_cleaned: cleanedText,
           ingredients_cleaned_at: now,
           ingredients_verified: cleanedText,
-          ingredients_verified_at: now,
           qc_status: newQcStatus,
         })
         .eq("id", product.id);

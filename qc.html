@@ -1321,7 +1321,8 @@ async function saveProduct() {
       .from('products')
       .update({
         ingredients_verified: verified,
-        ingredients_verified_at: new Date().toISOString(),
+        ingredients_verified_at: status === 'approved' ? new Date().toISOString() : null,
+        ingredients_verified_by: status === 'approved' ? 'Katie Hughes' : null,
         qc_status: status
       })
       .eq('id', product.id);

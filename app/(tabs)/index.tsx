@@ -432,7 +432,6 @@ export default function HomeScreen() {
           ingredients_cleaned: cleanedText,
           ingredients_cleaned_at: new Date().toISOString(),
           ingredients_verified: cleanedText,
-          ingredients_verified_at: new Date().toISOString(),
           rinse_off: rinseOff,
         }])
         .select()
