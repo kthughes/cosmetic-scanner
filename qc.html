@@ -987,7 +987,18 @@ async function renderIngredients(product) {
     });
     if (matchResults) {
       matchResults.forEach(ing => {
-        matchData[ing.inci_name.toUpperCase()] = ing;
+        if (ing.inci_name) {
+          // Standard INCI match — key by INCI name
+          matchData[ing.inci_name.toUpperCase()] = ing;
+        } else if (ing.chemical_name) {
+          // Partial chemical name match — key by whichever product
+          // ingredient triggered the match (chemical name contains it)
+          verifiedList.forEach(name => {
+            if (ing.chemical_name.toUpperCase().includes(name.toUpperCase())) {
+              matchData[name.toUpperCase()] = ing;
+            }
+          });
+        }
       });
     }
   }
